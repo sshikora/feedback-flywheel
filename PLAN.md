@@ -1,6 +1,6 @@
 # Feedback Flywheel: Project Plan
 
-**Status:** Draft v2 (review of 2026-10-31 folded in)
+**Status:** M0 and M1 built. Live serving needs a decision before M5 (see `docs/decisions/0005`).
 **Last updated:** 2026-10-31
 **Owner:** seth
 **Related:** `~/source/ai-lang-translation/docs/plans/community-trained-model.md` (product strategy for the in-app side), `~/source/ai-lang-translation/docs/plans/compare-and-vote.md` (the vote data this project consumes)
@@ -72,7 +72,8 @@ One record type for all feedback, independent of the source app, defined once as
 ```python
 class FeedbackEvent:
     id: str
-    source: str                      # "ai-lang-translation", "jsonl", "synthetic"
+    source: str                      # "ai-lang-translation", "jsonl", ...
+    origin: Literal["human", "synthetic"]
     created_at: datetime
     task: Literal["translation"]
     input: TranslationInput          # text, src_lang (as requested), detected_src_lang, tgt_lang, tone
@@ -90,16 +91,16 @@ class FeedbackEvent:
 ### 2. Ingest adapters
 
 - `jsonl`: generic file import.
-- `comparisons-export`: reads an export of the ai-lang-translation comparisons table and maps votes to preference events. Only voted or shared comparisons, which the app already keeps.
-- `flores`: downloads FLORES-200 sentences at runtime for eval sets. The data is CC-BY-SA, so it is never committed to this repo.
+- `comparisons-export`: reads an export of the ai-lang-translation comparisons table and maps votes to preference events. Only voted comparisons become events, because shared but unvoted ones carry no signal.
+- `flores`: downloads FLORES-200 at runtime and stores reference pairs as eval segments, a separate record type from feedback events. The data is CC-BY-SA, so it is never committed to this repo.
 
 ### 3. Curation
 
-- Dedupe by normalized input text and language pair.
-- PII and secret scrubbing before anything is stored.
+- PII and secret scrubbing at ingest, before anything is stored. Secrets drop the event, and personal data is redacted in the input and every candidate.
+- Dedupe by normalized input text, language pair and tone. Repeat votes are counted, not discarded: each curated event records its independent support and whether voters disagreed. Votes inside a short window count once, since votes carry no user id.
 - Quality scoring: agreement weighting (several models giving the same answer that also wins the vote is stronger signal), outlier and spam heuristics.
 - **Bias handling:** record `blind: false`, report vote share by model and the own-model pick rate, and never treat raw votes as ground truth for evaluation. Evaluation uses blind methods only (section 5).
-- Train/eval split with leakage protection: nothing in an eval set, or a near-duplicate of it, can enter training. FLORES dev and devtest are both excluded from training, since they share a domain.
+- Train/eval split with leakage protection: nothing in an eval set, or a near-duplicate of it, can enter training. FLORES dev and devtest are both excluded from training, since they share a domain. Matching covers inputs and all candidate outputs against both eval sides, at a threshold measured on real data (`docs/decisions/0006`).
 
 ### 4. Datasets and versioning
 
@@ -141,9 +142,10 @@ Two separate questions, answered separately:
 
 ### 9. Serving
 
-- Promoted models served per token through the fine-tuning provider's hosted LoRA endpoint (no always-on GPU).
-- **M0 verification:** the base model must be on Together's **serverless LoRA inference** list, which is narrower than its fine-tunable list. A base that is fine-tunable but not served per token needs a dedicated endpoint, which breaks the cost model.
-- ai-lang-translation adds an OpenAI-compatible provider pointed at it, mirroring `openrouter.ts`.
+- **Together has discontinued serverless LoRA inference**, found during M0. Adapters run only on dedicated endpoints billed per minute, so the original per-token design no longer works. Full analysis is in `docs/decisions/0005`.
+- **Offline evaluation** uses a short-lived dedicated endpoint: start it, run the eval sets, let idle shutdown stop it.
+- **Live serving (M5)** is an open decision. The recommendation is a scale-to-zero serverless GPU with exported weights, because the app's compare view already handles a model that times out on a cold start. An always-on endpoint would cost about $2,900 a month, so it is ruled out.
+- ai-lang-translation adds an OpenAI-compatible provider pointed at whichever host is chosen, mirroring `openrouter.ts`.
 - Local demo path: export the adapter and run it through Ollama for recordings, at zero cost.
 
 ---
@@ -180,11 +182,12 @@ feedback-flywheel/
     registry/    SQLite registry, model cards
     promote/     gate rules, challenger reports
     serve/       OpenAI-compatible client for the hosted adapter
+    scrub.py     PII and secret removal, run at ingest
     api/         FastAPI service (events, registry, status)
     cli.py       flywheel ingest | curate | build | train | eval | promote | report | serve
   configs/       one file per training run and per eval set
-  examples/
-    translation/ FLORES loader, comparisons-export adapter, example config
+  schemas/       generated JSON Schema, checked in CI
+  scripts/       reproducible measurements behind decisions
   packages/
     client-ts/   generated TypeScript types and client (later)
   infra/aws/     OpenTofu (stretch)
@@ -202,12 +205,12 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 
 | # | Milestone | Done when |
 |---|---|---|
-| M0 | Decisions and skeleton | Open decisions below answered and logged in `docs/decisions/`; verification items checked (serverless LoRA list, corpus licenses); uv project, CI, license, README stub pushed to a public GitHub repo. |
-| M1 | Schema, ingest, curation | `flywheel ingest` loads FLORES and a comparisons export into curated events; JSON Schema exported in CI; unit tests cover dedupe, PII scrubbing, leakage protection. |
+| M0 | Decisions and skeleton | Open decisions below answered and logged in `docs/decisions/`; verification items checked (LoRA serving, FLORES license); uv project, CI, license, README stub pushed to a public GitHub repo. **Built.** Other corpus licenses are checked when each corpus is added at M3. |
+| M1 | Schema, ingest, curation | `flywheel ingest` loads FLORES and a comparisons export into curated events; JSON Schema exported in CI; unit tests cover dedupe, PII scrubbing, leakage protection. **Built.** |
 | M2 | Eval harness and baseline | Baseline report on the chosen pair's FLORES devtest for the app's compare-set models and three candidate base models, with chrF++, judge win rates and confidence intervals, plus the first human-rated set. Base model chosen by headroom. Published as the first write-up. |
 | M3 | Training and registry | A LoRA SFT model trained through Together from a versioned dataset and a checked-in run config, registered with dataset hash, cost and a model card. Then a DPO run on preference pairs. |
 | M4 | Promotion gates | `flywheel promote` runs the pre-registered gate against the base model and produces a challenger report, pass or fail, with evidence, plus the positioning report against production models. **Minimum showable repo.** README leads with the result table and report link. |
-| M5 | Live integration | Challenger added to the app as a new `AIModel` (union, selector, dispatch, provider), in the free compare set behind a flag so it actually receives votes; its votes flow back through ingest. The loop is closed. |
+| M5 | Live integration | Serving decision made (`docs/decisions/0005`). Challenger added to the app as a new `AIModel` (union, selector, dispatch, provider), in the free compare set behind a flag so it actually receives votes; its votes flow back through ingest. The loop is closed. |
 | M6 | Polish and launch | Architecture diagram, README walkthrough, short demo video, decision log complete, write-up with a "what I would do differently" section, LinkedIn post. Resume updated. |
 | M7 | Stretch | AWS deployment with OpenTofu; second training provider; generated TypeScript client and the app pushing events directly. |
 
@@ -215,7 +218,8 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 
 - Development: about $20 to $75 a month (hosted fine-tuning per token, eval API calls, per-token serving).
 - One-time experimentation budget: $100 to $200.
-- No always-on GPU. COMET runs on the MacBook.
+- No always-on GPU. COMET runs on the MacBook. Offline evals use a dedicated endpoint for a few hours per run, at a listed $3.99 an hour for one H100.
+- Live serving at M5 is the one cost not yet settled. See `docs/decisions/0005`.
 - Re-check provider prices at M0; GPU and fine-tuning prices have moved during 2026.
 
 ---
@@ -229,7 +233,7 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 | Judge is not much better than the candidates | Judge from a different family, run in both orders, and the human set decides close calls. |
 | Too little real feedback data | Baseline and synthetic pairs carry M2 to M4; every manifest and report states human versus synthetic share. |
 | Vote bias (names visible) | Votes used for training signal only, never for evaluation. Own-model pick rate reported. |
-| Base model not served per token | Verified at M0 against Together's serverless LoRA list before the base is chosen. |
+| Live serving cost | Serverless LoRA is gone. Offline stages are unaffected. For M5, measure cold starts on a scale-to-zero GPU at M4, and confirm adapters can be exported and the base license allows self-hosting before choosing the base at M2. |
 | Corpus licenses and quality | Check each corpus. FLORES-200 is CC-BY-SA and is eval-only. NLLB-200 weights are CC-BY-NC, so no NLLB in anything commercial. No Cebuano Wikipedia derivatives. |
 | Timeline | Minimum showable repo at M4. M5 to M7 are additive; each can be cut without hollowing out what is already published. |
 | Fine-tuned model is worse | That is a valid result. The gate rejecting it, with evidence, is a feature to show, not a failure to hide. |
@@ -240,9 +244,10 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 
 1. **Repo name.** Working name `feedback-flywheel`.
 2. **First language pair.** English to Cebuano. Tier C in the community model plan, in FLORES-200, and sanity-checkable in Cebu. The metric caveats above are accepted as part of the story.
-3. **Base model.** Chosen at M2 by headroom from Together's serverless-LoRA-served list. Candidates: an 8B-class Gemma, Qwen or Llama instruct model. Gemma is the interesting one since Gemma 4 31B is one of the teachers, which makes a clean distillation narrative, but Together's support for Gemma fine-tuning must be confirmed at M0.
+3. **Base model.** Chosen at M2 by headroom from Together's LoRA fine-tuning list. Candidates include Qwen3.5 4B and 9B, Gemma 4 26B A4B and Llama 3.1 8B. Gemma 4 31B IT is on that list too and is also a teacher in the app's free compare set, but a teacher has no headroom over itself, so a smaller Gemma is the cleaner distillation story. Check that the base can be deployed and exported with `tg models configs <BASE_MODEL>`.
 4. **License.** Decided: Apache 2.0. It covers the code only; datasets keep their own licenses.
 5. **Native speaker for the human-rated set.** One person, about 100 sentences, scored twice a few weeks apart for consistency.
+6. **Live serving host.** Needed before M5. See `docs/decisions/0005`.
 
 ## Resume line when shipped
 

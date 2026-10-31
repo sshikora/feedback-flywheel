@@ -1,0 +1,89 @@
+{
+  "Items": [
+    {
+      "id": {"S": "voted-agreement"},
+      "sourceText": {"S": "Where is the market?"},
+      "sourceLanguage": {"S": "en"},
+      "detectedSourceLanguage": {"NULL": true},
+      "targetLanguage": {"S": "ceb"},
+      "tone": {"NULL": true},
+      "candidates": {"L": [
+        {"M": {"label": {"S": "A"}, "model": {"S": "GEMINI_FLASH"}, "translatedText": {"S": "Asa ang merkado?"}}},
+        {"M": {"label": {"S": "B"}, "model": {"S": "DEEPSEEK_FLASH"}, "translatedText": {"S": "Asa ang merkado?"}}},
+        {"M": {"label": {"S": "C"}, "model": {"S": "GEMMA"}, "error": {"S": "timed out"}}}
+      ]},
+      "yourModel": {"S": "GEMINI_FLASH"},
+      "isPro": {"BOOL": false},
+      "createdAt": {"S": "2026-10-27T10:00:00.000Z"},
+      "vote": {"M": {
+        "label": {"S": "A"},
+        "model": {"S": "GEMINI_FLASH"},
+        "models": {"L": [{"S": "GEMINI_FLASH"}, {"S": "DEEPSEEK_FLASH"}]},
+        "votedAt": {"S": "2026-10-27T10:01:00.000Z"}
+      }}
+    },
+    {
+      "id": {"S": "voted-shared-auto"},
+      "sourceText": {"S": "Thank you very much for dinner."},
+      "sourceLanguage": {"S": "auto"},
+      "detectedSourceLanguage": {"S": "en"},
+      "targetLanguage": {"S": "ceb"},
+      "tone": {"S": "casual"},
+      "candidates": {"L": [
+        {"M": {"label": {"S": "A"}, "model": {"S": "CLAUDE_SONNET"}, "translatedText": {"S": "Salamat kaayo sa panihapon."}}},
+        {"M": {"label": {"S": "B"}, "model": {"S": "GPT4O"}, "translatedText": {"S": "Daghang salamat sa inyong panihapon."}}}
+      ]},
+      "yourModel": {"S": "GPT4O"},
+      "isPro": {"BOOL": true},
+      "createdAt": {"S": "2026-10-27T11:00:00.000Z"},
+      "shared": {"BOOL": true},
+      "vote": {"M": {
+        "label": {"S": "A"},
+        "model": {"S": "CLAUDE_SONNET"},
+        "models": {"L": [{"S": "CLAUDE_SONNET"}]},
+        "votedAt": {"S": "2026-10-27T11:01:00.000Z"}
+      }}
+    },
+    {
+      "id": {"S": "shared-no-vote"},
+      "sourceText": {"S": "Good morning."},
+      "sourceLanguage": {"S": "en"},
+      "targetLanguage": {"S": "ceb"},
+      "candidates": {"L": [
+        {"M": {"label": {"S": "A"}, "model": {"S": "GEMMA"}, "translatedText": {"S": "Maayong buntag."}}}
+      ]},
+      "isPro": {"BOOL": false},
+      "createdAt": {"S": "2026-10-27T12:00:00.000Z"},
+      "shared": {"BOOL": true}
+    },
+    {
+      "id": {"S": "unvoted-awaiting-expiry"},
+      "sourceText": {"S": "See you tomorrow."},
+      "sourceLanguage": {"S": "en"},
+      "targetLanguage": {"S": "ceb"},
+      "candidates": {"L": [
+        {"M": {"label": {"S": "A"}, "model": {"S": "GEMMA"}, "translatedText": {"S": "Kita ta ugma."}}}
+      ]},
+      "isPro": {"BOOL": false},
+      "createdAt": {"S": "2026-10-27T13:00:00.000Z"},
+      "expiresAt": {"N": "1793098800"}
+    },
+    {
+      "id": {"S": "vote-for-failed-model"},
+      "sourceText": {"S": "How much is this?"},
+      "sourceLanguage": {"S": "en"},
+      "targetLanguage": {"S": "ceb"},
+      "candidates": {"L": [
+        {"M": {"label": {"S": "A"}, "model": {"S": "GEMMA"}, "error": {"S": "timed out"}}}
+      ]},
+      "isPro": {"BOOL": false},
+      "createdAt": {"S": "2026-10-27T14:00:00.000Z"},
+      "vote": {"M": {
+        "label": {"S": "A"},
+        "model": {"S": "GEMMA"},
+        "models": {"L": [{"S": "GEMMA"}]},
+        "votedAt": {"S": "2026-10-27T14:01:00.000Z"}
+      }}
+    }
+  ]
+}

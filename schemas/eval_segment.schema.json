@@ -1,0 +1,45 @@
+{
+  "additionalProperties": false,
+  "description": "A reference pair from a fixed benchmark. Never enters training.",
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "corpus": {
+      "title": "Corpus",
+      "type": "string"
+    },
+    "split": {
+      "title": "Split",
+      "type": "string"
+    },
+    "src_lang": {
+      "title": "Src Lang",
+      "type": "string"
+    },
+    "tgt_lang": {
+      "title": "Tgt Lang",
+      "type": "string"
+    },
+    "source": {
+      "title": "Source",
+      "type": "string"
+    },
+    "reference": {
+      "title": "Reference",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "corpus",
+    "split",
+    "src_lang",
+    "tgt_lang",
+    "source",
+    "reference"
+  ],
+  "title": "EvalSegment",
+  "type": "object"
+}

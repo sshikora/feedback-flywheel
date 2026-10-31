@@ -1,0 +1,309 @@
+{
+  "$defs": {
+    "Candidate": {
+      "additionalProperties": false,
+      "description": "One model's answer. Failed candidates are kept because they explain missing pairs.",
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "model_id": {
+          "title": "Model Id",
+          "type": "string"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "required": [
+        "label",
+        "model_id"
+      ],
+      "title": "Candidate",
+      "type": "object"
+    },
+    "Consent": {
+      "additionalProperties": false,
+      "properties": {
+        "training": {
+          "title": "Training",
+          "type": "boolean"
+        },
+        "publish": {
+          "title": "Publish",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "training",
+        "publish"
+      ],
+      "title": "Consent",
+      "type": "object"
+    },
+    "EventContext": {
+      "additionalProperties": false,
+      "properties": {
+        "blind": {
+          "description": "False when the rater could see model names.",
+          "title": "Blind",
+          "type": "boolean"
+        },
+        "your_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The rater's usual model, if any.",
+          "title": "Your Model"
+        },
+        "model_set": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which candidate set was offered.",
+          "title": "Model Set"
+        },
+        "ui_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ui Version"
+        }
+      },
+      "required": [
+        "blind"
+      ],
+      "title": "EventContext",
+      "type": "object"
+    },
+    "FeedbackEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "human",
+            "synthetic"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "task": {
+          "const": "translation",
+          "default": "translation",
+          "title": "Task",
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/TranslationInput"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          },
+          "minItems": 1,
+          "title": "Candidates",
+          "type": "array"
+        },
+        "signal": {
+          "$ref": "#/$defs/PreferenceSignal"
+        },
+        "context": {
+          "$ref": "#/$defs/EventContext"
+        },
+        "consent": {
+          "$ref": "#/$defs/Consent"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "origin",
+        "created_at",
+        "input",
+        "candidates",
+        "signal",
+        "context",
+        "consent"
+      ],
+      "title": "FeedbackEvent",
+      "type": "object"
+    },
+    "PreferenceSignal": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "preference",
+          "default": "preference",
+          "title": "Kind",
+          "type": "string"
+        },
+        "chosen": {
+          "description": "Model ids. An agreement group counts for all of its models.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Chosen",
+          "type": "array"
+        }
+      },
+      "required": [
+        "chosen"
+      ],
+      "title": "PreferenceSignal",
+      "type": "object"
+    },
+    "TranslationInput": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "src_lang": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "As requested; None for auto-detect.",
+          "title": "Src Lang"
+        },
+        "detected_src_lang": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detected Src Lang"
+        },
+        "tgt_lang": {
+          "minLength": 1,
+          "title": "Tgt Lang",
+          "type": "string"
+        },
+        "tone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tone"
+        }
+      },
+      "required": [
+        "text",
+        "tgt_lang"
+      ],
+      "title": "TranslationInput",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A feedback event after dedupe, with the evidence behind it.",
+  "properties": {
+    "event": {
+      "$ref": "#/$defs/FeedbackEvent"
+    },
+    "support": {
+      "description": "Independent votes for the chosen answer.",
+      "minimum": 1,
+      "title": "Support",
+      "type": "integer"
+    },
+    "group_size": {
+      "description": "Independent votes on this input for any answer.",
+      "minimum": 1,
+      "title": "Group Size",
+      "type": "integer"
+    },
+    "contested": {
+      "description": "True when voters on this input chose different answers.",
+      "title": "Contested",
+      "type": "boolean"
+    },
+    "quality": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Quality",
+      "type": "number"
+    }
+  },
+  "required": [
+    "event",
+    "support",
+    "group_size",
+    "contested",
+    "quality"
+  ],
+  "title": "CuratedEvent",
+  "type": "object"
+}

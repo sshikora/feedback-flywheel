@@ -1,0 +1,9 @@
+# Defaults for `flywheel curate`. Copy and pass with --config to change them.
+# Curation settings are recorded in report.json, so every curated set can be
+# traced back to the rules that produced it.
+
+heldout_pct = 10.0            # share of community events held out from training
+near_dup_threshold = 0.6      # trigram Jaccard similarity that counts as leakage. See docs/decisions/0006.
+burst_window_seconds = 600    # votes on one input inside this window count once
+max_length_ratio = 5.0        # chosen output vs input length, in either direction
+seed = "flywheel-v1"          # changing this changes the train and held-out split

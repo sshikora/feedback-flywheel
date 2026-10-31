@@ -1,6 +1,6 @@
 # Feedback Flywheel: Project Plan
 
-**Status:** M0 and M1 built. Live serving needs a decision before M5 (see `docs/decisions/0005`).
+**Status:** M0 and M1 built. Live serving is decided, subject to a cold-start test at M4 (see `docs/decisions/0005`).
 **Last updated:** 2026-10-31
 **Owner:** seth
 **Related:** `~/source/ai-lang-translation/docs/plans/community-trained-model.md` (product strategy for the in-app side), `~/source/ai-lang-translation/docs/plans/compare-and-vote.md` (the vote data this project consumes)
@@ -137,14 +137,21 @@ Two separate questions, answered separately:
 
 - **Gate: better than its own base model.** This proves the pipeline works. Candidate becomes challenger when it beats its base on chrF++ beyond the confidence interval, has a judge win rate against the base of at least 55%, and shows no regression on a guard set. Thresholds are **pre-registered** in the run config before training starts.
 - **Report: where it stands against the production models.** The challenger report also scores it against the app's compare-set models. This is positioning, not a gate, and the write-up presents it honestly, including when the challenger loses.
-- **Online stage** (challenger to champion): the model appears as one card in the app's compare view behind a flag. Votes on it are tracked separately. Promotion needs a minimum vote count and win rate, both set before the test starts. At current traffic this stage will not conclude inside the project timeline, and the plan does not depend on it.
+- **Online stage** (challenger to champion): the model appears as one card in the app's compare view behind a flag, on English to Cebuano comparisons only, for a fixed 30-day window. Votes on it are tracked separately. Promotion needs a minimum vote count and win rate, both set before the test starts. At current traffic the window may close without reaching that count. That is reported as inconclusive, and the plan does not depend on it.
 - Every promotion or rejection is written to the registry with its evidence.
 
 ### 9. Serving
 
-- **Together has discontinued serverless LoRA inference**, found during M0. Adapters run only on dedicated endpoints billed per minute, so the original per-token design no longer works. Full analysis is in `docs/decisions/0005`.
-- **Offline evaluation** uses a short-lived dedicated endpoint: start it, run the eval sets, let idle shutdown stop it.
-- **Live serving (M5)** is an open decision. The recommendation is a scale-to-zero serverless GPU with exported weights, because the app's compare view already handles a model that times out on a cold start. An always-on endpoint would cost about $2,900 a month, so it is ruled out.
+- **Together has discontinued serverless LoRA inference**, found during M0. Adapters there run only on dedicated endpoints, and an always-on endpoint would cost about $2,900 a month, so that is ruled out. Full analysis is in `docs/decisions/0005`.
+- **Host:** a scale-to-zero GPU on Modal or RunPod, billed by the second. Training stays on Together. The adapter is exported and merged into the base model for self-hosting.
+- **Offline evaluation** uses the same host. A short-lived Together dedicated endpoint is the fallback if export or self-hosting is blocked.
+- **Live serving limits (M5):**
+  - The challenger runs only on English to Cebuano comparisons.
+  - The app enforces a daily cap, starting at 50 requests, then carries on with the other models. This sets a firm spending limit that does not depend on any host feature.
+  - The app wakes the model when a user selects Cebuano as the target language. At low traffic nearly every request finds the model asleep, and the app gives each model 12 seconds, so without this the challenger would time out and collect few votes.
+  - The live test runs for a fixed 30 days, then the results are published and the model is switched off.
+- **Cold-start test (M4):** the live plan goes ahead if a pre-warmed model reliably answers within 12 seconds.
+- **Fallback, at no ongoing cost:** skip live hosting. Run the challenger offline on real voted inputs, have the Cebuano rater score the results blind, and record the demo through Ollama. The "ran it live" claim comes off the resume line.
 - ai-lang-translation adds an OpenAI-compatible provider pointed at whichever host is chosen, mirroring `openrouter.ts`.
 - Local demo path: export the adapter and run it through Ollama for recordings, at zero cost.
 
@@ -207,10 +214,10 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 |---|---|---|
 | M0 | Decisions and skeleton | Open decisions below answered and logged in `docs/decisions/`; verification items checked (LoRA serving, FLORES license); uv project, CI, license, README stub pushed to a public GitHub repo. **Built.** Other corpus licenses are checked when each corpus is added at M3. |
 | M1 | Schema, ingest, curation | `flywheel ingest` loads FLORES and a comparisons export into curated events; JSON Schema exported in CI; unit tests cover dedupe, PII scrubbing, leakage protection. **Built.** |
-| M2 | Eval harness and baseline | Baseline report on the chosen pair's FLORES devtest for the app's compare-set models and three candidate base models, with chrF++, judge win rates and confidence intervals, plus the first human-rated set. Base model chosen by headroom. Published as the first write-up. |
+| M2 | Eval harness and baseline | Baseline report on the chosen pair's FLORES devtest for the app's compare-set models and three candidate base models, with chrF++, judge win rates and confidence intervals, plus the first human-rated set. Base model chosen by headroom, from those that fit the cheapest GPU tier, can be exported, and are licensed for self-hosting. Published as the first write-up. |
 | M3 | Training and registry | A LoRA SFT model trained through Together from a versioned dataset and a checked-in run config, registered with dataset hash, cost and a model card. Then a DPO run on preference pairs. |
-| M4 | Promotion gates | `flywheel promote` runs the pre-registered gate against the base model and produces a challenger report, pass or fail, with evidence, plus the positioning report against production models. **Minimum showable repo.** README leads with the result table and report link. |
-| M5 | Live integration | Serving decision made (`docs/decisions/0005`). Challenger added to the app as a new `AIModel` (union, selector, dispatch, provider), in the free compare set behind a flag so it actually receives votes; its votes flow back through ingest. The loop is closed. |
+| M4 | Promotion gates | `flywheel promote` runs the pre-registered gate against the base model and produces a challenger report, pass or fail, with evidence, plus the positioning report against production models. Cold-start test run and serving host chosen. **Minimum showable repo.** README leads with the result table and report link. |
+| M5 | Live integration | Challenger added to the app as a new `AIModel` (union, selector, dispatch, provider), in the free compare set for English to Cebuano only, behind a flag, with the daily cap and pre-warm in place. It runs for 30 days and its votes flow back through ingest. The loop is closed. If the M4 test fails, this milestone becomes the offline fallback in section 9. |
 | M6 | Polish and launch | Architecture diagram, README walkthrough, short demo video, decision log complete, write-up with a "what I would do differently" section, LinkedIn post. Resume updated. |
 | M7 | Stretch | AWS deployment with OpenTofu; second training provider; generated TypeScript client and the app pushing events directly. |
 
@@ -218,8 +225,9 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 
 - Development: about $20 to $75 a month (hosted fine-tuning per token, eval API calls, per-token serving).
 - One-time experimentation budget: $100 to $200.
-- No always-on GPU. COMET runs on the MacBook. Offline evals use a dedicated endpoint for a few hours per run, at a listed $3.99 an hour for one H100.
-- Live serving at M5 is the one cost not yet settled. See `docs/decisions/0005`.
+- No always-on GPU. COMET runs on the MacBook.
+- Offline evals run on the same small GPU as live serving, at about $0.59 an hour. A run may take about an hour, which has not been measured yet.
+- Live test at M5: about $1.50 a month at 5 Cebuano comparisons a day, and about $15 at most at the 50-a-day cap. Free host credits may cover this. These figures assume each request keeps the GPU awake for about 60 seconds, which M4 will measure.
 - Re-check provider prices at M0; GPU and fine-tuning prices have moved during 2026.
 
 ---
@@ -233,7 +241,9 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 | Judge is not much better than the candidates | Judge from a different family, run in both orders, and the human set decides close calls. |
 | Too little real feedback data | Baseline and synthetic pairs carry M2 to M4; every manifest and report states human versus synthetic share. |
 | Vote bias (names visible) | Votes used for training signal only, never for evaluation. Own-model pick rate reported. |
-| Live serving cost | Serverless LoRA is gone. Offline stages are unaffected. For M5, measure cold starts on a scale-to-zero GPU at M4, and confirm adapters can be exported and the base license allows self-hosting before choosing the base at M2. |
+| Live serving cost | Serverless LoRA is gone, so the challenger runs on a scale-to-zero GPU. English to Cebuano only, a daily cap enforced in the app and a 30-day window keep the cost bounded. |
+| Challenger times out on cold starts and collects few votes | The app pre-warms the model when Cebuano is selected. The M4 test confirms this works before anything goes live, and the offline fallback costs nothing. |
+| Adapter cannot be exported or self-hosted | Confirm export and the base model's license before choosing the base at M2. Fall back to a short-lived Together endpoint for evals. |
 | Corpus licenses and quality | Check each corpus. FLORES-200 is CC-BY-SA and is eval-only. NLLB-200 weights are CC-BY-NC, so no NLLB in anything commercial. No Cebuano Wikipedia derivatives. |
 | Timeline | Minimum showable repo at M4. M5 to M7 are additive; each can be cut without hollowing out what is already published. |
 | Fine-tuned model is worse | That is a valid result. The gate rejecting it, with evidence, is a feature to show, not a failure to hide. |
@@ -244,13 +254,13 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 
 1. **Repo name.** Working name `feedback-flywheel`.
 2. **First language pair.** English to Cebuano. Tier C in the community model plan, in FLORES-200, and sanity-checkable in Cebu. The metric caveats above are accepted as part of the story.
-3. **Base model.** Chosen at M2 by headroom from Together's LoRA fine-tuning list. Candidates include Qwen3.5 4B and 9B, Gemma 4 26B A4B and Llama 3.1 8B. Gemma 4 31B IT is on that list too and is also a teacher in the app's free compare set, but a teacher has no headroom over itself, so a smaller Gemma is the cleaner distillation story. Check that the base can be deployed and exported with `tg models configs <BASE_MODEL>`.
+3. **Base model.** Chosen at M2 by headroom from Together's LoRA fine-tuning list. Candidates include Qwen3.5 4B and 9B, Gemma 4 26B A4B and Llama 3.1 8B. Gemma 4 31B IT is on that list too and is also a teacher in the app's free compare set, but a teacher has no headroom over itself, so a smaller Gemma is the cleaner distillation story. A small base is preferred because it must fit the cheapest GPU tier. Confirm that the adapter can be exported and that the license allows self-hosting.
 4. **License.** Decided: Apache 2.0. It covers the code only; datasets keep their own licenses.
 5. **Native speaker for the human-rated set.** One person, about 100 sentences, scored twice a few weeks apart for consistency.
-6. **Live serving host.** Needed before M5. See `docs/decisions/0005`.
+6. **Live serving host.** Modal or RunPod, chosen at M4 from the cold-start test. See `docs/decisions/0005`.
 
 ## Resume line when shipped
 
 > Built and open-sourced a human-feedback model improvement pipeline in Python (preference curation, LoRA SFT and DPO, blind evaluation with bootstrap confidence intervals, pre-registered promotion gates) and ran it live behind translate.moretosay.org, where a fine-tuned challenger competes in the product's compare view. [N] human votes, [X]-point chrF++ gain over base on FLORES-200 Cebuano, 95% CI [a, b].
 
-Fill in the bracketed numbers from the M4 report. If the gain is zero or negative, the line says so and leads with the gate instead.
+Fill in the bracketed numbers from the M4 report. If the gain is zero or negative, the line says so and leads with the gate instead. If the offline fallback is used, replace the live claim with the blind human evaluation.

@@ -1,0 +1,49 @@
+[project]
+name = "feedback-flywheel"
+version = "0.1.0"
+description = "Turn human feedback on model output into better models, and prove each one is better before it ships."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Seth Shikora", email = "seth@shikora.org" }]
+dependencies = [
+    "pydantic>=2.9,<3",
+    "typer>=0.12,<1",
+]
+
+[project.scripts]
+flywheel = "flywheel.cli:app"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["flywheel"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["flywheel"]
+plugins = ["pydantic.mypy"]

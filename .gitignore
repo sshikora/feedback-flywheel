@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Pipeline data never enters this repo. See docs/decisions/0003.
+/data/
+/.cache/
+*.jsonl
+*.jsonl.gz
+!tests/fixtures/*.jsonl
+
+# Local
+.env
+.DS_Store

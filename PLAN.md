@@ -41,7 +41,7 @@ The write-up says all of this plainly. The thing being demonstrated is the machi
 
 ## Relationship to ai-lang-translation
 
-- **This repo** is public (MIT or Apache 2.0) and owns the pipeline: schemas, curation, dataset builders, eval harness, training orchestration, registry, promotion logic.
+- **This repo** is public (Apache 2.0) and owns the pipeline: schemas, curation, dataset builders, eval harness, training orchestration, registry, promotion logic.
 - **ai-lang-translation** stays private. It exports feedback (from the comparisons table) and consumes promoted models as one more provider, the same way `providers/openrouter.ts` works.
 - No user data ever enters this repo. Example data is public corpora or synthetic.
 - This project is Layer 0 to Layer 2 of `community-trained-model.md`, built as reusable infrastructure. That plan's gate still applies to users: a fine-tuned model reaches the default path only after it wins. Before then it runs offline or as an opt-in compare card.
@@ -91,7 +91,7 @@ class FeedbackEvent:
 
 - `jsonl`: generic file import.
 - `comparisons-export`: reads an export of the ai-lang-translation comparisons table and maps votes to preference events. Only voted or shared comparisons, which the app already keeps.
-- `flores`: loads FLORES-200 sentences for eval sets.
+- `flores`: downloads FLORES-200 sentences at runtime for eval sets. The data is CC-BY-SA, so it is never committed to this repo.
 
 ### 3. Curation
 
@@ -241,7 +241,7 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 1. **Repo name.** Working name `feedback-flywheel`.
 2. **First language pair.** English to Cebuano. Tier C in the community model plan, in FLORES-200, and sanity-checkable in Cebu. The metric caveats above are accepted as part of the story.
 3. **Base model.** Chosen at M2 by headroom from Together's serverless-LoRA-served list. Candidates: an 8B-class Gemma, Qwen or Llama instruct model. Gemma is the interesting one since Gemma 4 31B is one of the teachers, which makes a clean distillation narrative, but Together's support for Gemma fine-tuning must be confirmed at M0.
-4. **License.** MIT or Apache 2.0.
+4. **License.** Decided: Apache 2.0. It covers the code only; datasets keep their own licenses.
 5. **Native speaker for the human-rated set.** One person, about 100 sentences, scored twice a few weeks apart for consistency.
 
 ## Resume line when shipped

@@ -148,7 +148,7 @@ Two separate questions, answered separately:
 - **Live serving limits (M5):**
   - The challenger runs only on English to Cebuano comparisons.
   - The app enforces a daily cap, starting at 50 requests, then carries on with the other models. This sets a firm spending limit that does not depend on any host feature.
-  - The app wakes the model when a user selects Cebuano as the target language. At low traffic nearly every request finds the model asleep, and the app gives each model 12 seconds, so without this the challenger would time out and collect few votes.
+  - The app wakes the model when a user selects Cebuano as the target language. At low traffic nearly every request finds the model asleep. The app gives each model 12 seconds and returns all answers together, so without this a sleeping challenger would stall the whole comparison, then fail and collect no vote.
   - The live test runs for a fixed 30 days, then the results are published and the model is switched off.
 - **Cold-start test (M4):** the live plan goes ahead if a pre-warmed model reliably answers within 12 seconds.
 - **Fallback, at no ongoing cost:** skip live hosting. Run the challenger offline on real voted inputs, have the Cebuano rater score the results blind, and record the demo through Ollama. The "ran it live" claim comes off the resume line.
@@ -223,7 +223,7 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 
 ## Cost estimate
 
-- Development: about $20 to $75 a month (hosted fine-tuning per token, eval API calls, per-token serving).
+- Development: about $20 to $75 a month (hosted fine-tuning per token, eval API calls).
 - One-time experimentation budget: $100 to $200.
 - No always-on GPU. COMET runs on the MacBook.
 - Offline evals run on the same small GPU as live serving, at about $0.59 an hour. A run may take about an hour, which has not been measured yet.
@@ -242,7 +242,7 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 | Too little real feedback data | Baseline and synthetic pairs carry M2 to M4; every manifest and report states human versus synthetic share. |
 | Vote bias (names visible) | Votes used for training signal only, never for evaluation. Own-model pick rate reported. |
 | Live serving cost | Serverless LoRA is gone, so the challenger runs on a scale-to-zero GPU. English to Cebuano only, a daily cap enforced in the app and a 30-day window keep the cost bounded. |
-| Challenger times out on cold starts and collects few votes | The app pre-warms the model when Cebuano is selected. The M4 test confirms this works before anything goes live, and the offline fallback costs nothing. |
+| Challenger cold starts stall comparisons and collect few votes | The app pre-warms the model when Cebuano is selected. The M4 test confirms this works before anything goes live, and the offline fallback costs nothing. |
 | Adapter cannot be exported or self-hosted | Confirm export and the base model's license before choosing the base at M2. Fall back to a short-lived Together endpoint for evals. |
 | Corpus licenses and quality | Check each corpus. FLORES-200 is CC-BY-SA and is eval-only. NLLB-200 weights are CC-BY-NC, so no NLLB in anything commercial. No Cebuano Wikipedia derivatives. |
 | Timeline | Minimum showable repo at M4. M5 to M7 are additive; each can be cut without hollowing out what is already published. |

@@ -27,7 +27,7 @@ Offline evaluation uses the same host. A short-lived Together dedicated endpoint
 
 Pre-warm requests add to this, and each one counts against the daily cap. Modal may also offer free monthly credits of about $30, but sources conflict on the amount.
 
-**Why cold starts matter.** At low traffic, nearly every request finds the model asleep. The app gives each model 12 seconds and returns all answers together, so a slow challenger would time out without delaying the others much, and it would collect few votes. Raising the timeout would make every comparison wait. Pre-warming avoids both problems, and it needs a small app change.
+**Why cold starts matter.** At low traffic, nearly every request finds the model asleep. The app gives each model 12 seconds and returns all answers together, so a sleeping challenger would hold up the whole comparison for the full 12 seconds, then show as failed and collect no vote. Raising the timeout would make that wait longer. Pre-warming avoids both problems, and it needs a small app change.
 
 **Test at M4.** On the chosen base model, measure the time from a cold start to the first answer, and the time for a warm answer. The live plan goes ahead if a pre-warmed model reliably answers within 12 seconds.
 

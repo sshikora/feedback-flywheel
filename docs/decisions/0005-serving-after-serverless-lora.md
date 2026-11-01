@@ -1,6 +1,6 @@
 # 0005: How to serve a challenger now serverless LoRA is gone
 
-**Status:** Accepted, 2026-10-31, subject to the cold-start test at M4. M0 to M3 are unaffected.
+**Status:** Accepted, 2026-10-31, subject to the cold-start test at M4. M0 to M3 are unaffected. The fixed window is replaced by `0008`, and the fallback's real voted inputs by `0009`.
 
 **Context.** The plan assumed per-token LoRA serving with no always-on GPU. Checking this at M0 showed that assumption is false. Together's docs state that serverless LoRA inference, including Serverless Multi-LoRA, has been discontinued. Adapters now run on dedicated endpoints, billed per minute per running replica. Idle shutdown is opt-in through an inactive timeout of 30 to 1,440 minutes.
 

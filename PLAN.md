@@ -1,7 +1,7 @@
 # Feedback Flywheel: Project Plan
 
-**Status:** M0 and M1 built. Live serving is decided, subject to a cold-start test at M4 (see `docs/decisions/0005`).
-**Last updated:** 2026-10-31
+**Status:** M0 and M1 built. Live serving is decided, subject to a cold-start test at M4 (see `docs/decisions/0005`). A native-speaker rater app is added at M4 (see `docs/decisions/0007`). The loop keeps running after launch (see `docs/decisions/0008`).
+**Last updated:** 2026-11-01
 **Owner:** seth
 **Related:** `~/source/ai-lang-translation/docs/plans/community-trained-model.md` (product strategy for the in-app side), `~/source/ai-lang-translation/docs/plans/compare-and-vote.md` (the vote data this project consumes)
 
@@ -23,7 +23,7 @@ This is the public proof for an AI platform / applied AI engineering job search.
 
 1. Research-to-production engineering: data pipelines, model registry, async training jobs, promotion gates.
 2. Evaluation discipline: fixed eval sets, automated metrics, LLM-as-judge, human ratings, confidence intervals, regression checks.
-3. Human feedback loops: preference data feeding LoRA SFT and DPO.
+3. Human feedback loops: preference data and native-speaker corrections feeding LoRA SFT and DPO.
 4. Production integration: a fine-tuned model running as a challenger inside a live product.
 
 Every design choice below favors "a reviewer understands it in two minutes, and can verify it in ten" over "maximum capability." Reviewers skim: the README leads with one real result table and a link to a live evaluation report, then the architecture diagram, then everything else.
@@ -34,6 +34,7 @@ Stated up front because it shapes the base-model choice and the write-up:
 
 - Free comparisons run Gemini Flash, DeepSeek V4.1 Flash and Gemma 4 31B on inputs under 300 characters. A vote **selects among their outputs**. It adds no knowledge those models lack. Training on voted outputs is distillation from the compare set, steered by human preference. Synthetic preference pairs ranked by metric or judge have the same ceiling.
 - Therefore the fine-tuned base model must start **measurably below the compare-set models** on the chosen language pair, or there is no headroom and the promotion gate can never pass. The M2 baseline ranks candidate base models by headroom, not by raw quality.
+- **Native-speaker corrections are the exception.** A rater who fixes a translation adds text no model wrote, so corrections are the one signal that can go beyond this ceiling. They are slow to collect, so they extend the plan and do not replace it.
 - Votes are cast with model names visible, so they carry brand bias and "picked my usual model" bias. They are training signal only, never evaluation signal.
 - Real vote volume will be small for months (votes started 2026-10-26). The pipeline has to be useful before the data is.
 
@@ -43,9 +44,9 @@ The write-up says all of this plainly. The thing being demonstrated is the machi
 
 - **This repo** is public (Apache 2.0) and owns the pipeline: schemas, curation, dataset builders, eval harness, training orchestration, registry, promotion logic.
 - **ai-lang-translation** stays private. It exports feedback (from the comparisons table) and consumes promoted models as one more provider, the same way `providers/openrouter.ts` works.
-- No user data ever enters this repo. Example data is public corpora or synthetic.
+- No user data ever enters this repo. The same goes for ratings, corrections and rater ids. Example data is public corpora or synthetic.
 - This project is Layer 0 to Layer 2 of `community-trained-model.md`, built as reusable infrastructure. That plan's gate still applies to users: a fine-tuned model reaches the default path only after it wins. Before then it runs offline or as an opt-in compare card.
-- **Consent is already covered.** The app's vote line reads "Your vote and the text you compared are saved anonymously to improve translations", and the privacy section on `/about#data-retention` says comparisons and votes are kept to improve translation quality and publish aggregate results. Training is within that scope. Publishing raw text is not, except for comparisons the user shared.
+- **Consent is partly covered.** The app's vote line reads "Your vote and the text you compared are saved anonymously to improve translations", and the privacy section on `/about#data-retention` says comparisons and votes are kept to improve translation quality and publish aggregate results. Training is within that purpose, but the page names no training provider, so real votes reach one only after it does, and then only votes saved after that change. Raters never see user text. Publishing raw text is out of scope, except for comparisons the user shared. See `docs/decisions/0009`.
 
 ---
 
@@ -79,19 +80,23 @@ class FeedbackEvent:
     input: TranslationInput          # text, src_lang (as requested), detected_src_lang, tgt_lang, tone
     candidates: list[Candidate]      # label, model_id, output | error
     signal: PreferenceSignal         # kind="preference", chosen: list[model_id]  (an agreement group counts for all its models)
-    context: EventContext            # blind: bool, your_model: model_id | None, model_set: "free" | "pro", ui_version
+    context: EventContext            # blind: bool, your_model: model_id | None, model_set: "free" | "pro", ui_version, rater_id: str | None
     consent: Consent                 # training: bool, publish: bool
 ```
 
-- `signal` is a discriminated union with one member in v1. `correction` and `implicit` kinds are deliberately left out until the app produces them.
+- `signal` is a discriminated union with one member in v1. The rater app adds a `correction` kind at M4, holding the rater's corrected text. `implicit` stays out until the app produces it.
+- `context.rater_id` is a pseudonymous id, set only on rater app events. Votes still carry no user id.
+- Evaluation scores are a separate `HumanRating` record (segment, model, rater, round, adequacy, fluency), like eval segments. They are not feedback events and never enter training.
 - `context.your_model` and `context.model_set` are carried because the compare spec promises a split into "picked their own model" and "picked another", and because the free and Pro model sets are different output distributions.
 - `consent.publish` is derived from the comparison's `shared` attribute. Only shared comparisons have public text.
+- `consent.training` is false for votes saved before the privacy page names a training provider. The comparisons adapter currently sets it to true for every vote, which must change before the first upload at M3. Curation already drops events without it.
 - Candidates with an error are kept in the record (they explain missing rejected pairs) but never enter a dataset.
 
 ### 2. Ingest adapters
 
 - `jsonl`: generic file import.
 - `comparisons-export`: reads an export of the ai-lang-translation comparisons table and maps votes to preference events. Only voted comparisons become events, because shared but unvoted ones carry no signal.
+- `rater`: reads an export from the rater app. Picks become preference events and corrections become correction events, both with `blind: true`, and they go through curation like any other feedback.
 - `flores`: downloads FLORES-200 at runtime and stores reference pairs as eval segments, a separate record type from feedback events. The data is CC-BY-SA, so it is never committed to this repo.
 
 ### 3. Curation
@@ -104,7 +109,7 @@ class FeedbackEvent:
 
 ### 4. Datasets and versioning
 
-- Builders: SFT (`input -> chosen output`) and DPO (`input, chosen, rejected`). Rejected candidates come from the same comparison, so pairs are on-policy for the compare set. Many rejected outputs are also correct translations with a different phrasing. That is a weak signal and the reports say what share of pairs differ only stylistically.
+- Builders: SFT (`input -> chosen output`) and DPO (`input, chosen, rejected`). Rejected candidates come from the same comparison, so pairs are on-policy for the compare set. A correction gives an SFT example, and a DPO pair with the corrected text as chosen and the model's output as rejected. Many rejected outputs are also correct translations with a different phrasing. That is a weak signal and the reports say what share of pairs differ only stylistically.
 - Every built dataset is an immutable, content-hashed snapshot with a manifest (source events, filters, counts, human versus synthetic share, hash). Training runs reference a dataset hash, so any model traces back to exactly what it learned from.
 - A **data card** per dataset snapshot, generated from the manifest.
 - Storage: local filesystem in v1, S3 in the AWS deployment.
@@ -113,10 +118,10 @@ class FeedbackEvent:
 
 Cebuano is a low-resource language, and that breaks two of the three usual metrics. The harness is designed around that.
 
-- **Eval sets:** FLORES-200 devtest for the chosen language pair (fixed benchmark, about 1,000 sentences), a held-out set of community-preferred pairs once there are enough, and a **human-rated set** of about 100 sentences scored by seth and one native speaker on a simple adequacy and fluency scale.
+- **Eval sets:** FLORES-200 devtest for the chosen language pair (fixed benchmark, about 1,000 sentences), a held-out set of community-preferred pairs once there are enough, and a **human-rated set** of about 100 FLORES devtest sentences, selected by a fixed seed and scored blind by native speakers for adequacy and fluency (section 10).
 - **Primary metric: chrF++** via sacrebleu. It is language-agnostic and reference-based, so it is valid for Cebuano.
 - **COMET is reported, not trusted.** COMET's backbone (XLM-R) does not cover Cebuano, so its scores are unvalidated for this pair. Reports label it as such. If MetricX or a Cebuano-validated metric appears, swap it in.
-- **LLM-as-judge:** pairwise, blind to model names, run in both orders to cancel position bias, reported as win rate. The judge must be a model from a **different family than any candidate**, to avoid self-preference bias. The write-up notes that frontier models are only moderately competent in Cebuano, which is why the human-rated set exists as the tie-breaker.
+- **LLM-as-judge:** pairwise, blind to model names, run in both orders to cancel position bias, reported as win rate. The judge must be a model from a **different family than any candidate**, to avoid self-preference bias. The write-up notes that frontier models are only moderately competent in Cebuano, which is why the human-rated set can veto a model at the gate.
 - **Statistics:** bootstrap confidence intervals on every score. A difference inside the interval is reported as a tie.
 - **Reports:** one static HTML page per run (scores, intervals, per-sentence diffs, worst regressions, human versus synthetic share of training data). These double as portfolio artifacts.
 
@@ -135,9 +140,11 @@ Each model gets a record: id, base model, method (SFT/DPO), dataset hash, run co
 
 Two separate questions, answered separately:
 
-- **Gate: better than its own base model.** This proves the pipeline works. Candidate becomes challenger when it beats its base on chrF++ beyond the confidence interval, has a judge win rate against the base of at least 55%, and shows no regression on a guard set. Thresholds are **pre-registered** in the run config before training starts.
+- **Gate: better than what it replaces.** The first version is compared with its own base model, which proves the pipeline works. Later versions are compared with the current live version, which proves the loop is still improving. A candidate becomes challenger when it beats that version on chrF++ beyond the confidence interval, has a judge win rate against it of at least 55%, shows no regression on a guard set, and passes a blind human check. Thresholds are **pre-registered** in the run config before training starts.
+- **Human check.** Candidates that pass the automated checks are scored by raters on the human-rated set, mixed with the version they must beat and blind to which is which. Neither adequacy nor fluency may fall below that version beyond the confidence interval. With about 100 sentences this is a veto, not proof of improvement. A candidate that misses the check, or has no round because no rater is available, stays a candidate and does not reach the app.
 - **Report: where it stands against the production models.** The challenger report also scores it against the app's compare-set models. This is positioning, not a gate, and the write-up presents it honestly, including when the challenger loses.
-- **Online stage** (challenger to champion): the model appears as one card in the app's compare view behind a flag, on English to Cebuano comparisons only, for a fixed 30-day window. Votes on it are tracked separately. Promotion needs a minimum vote count and win rate, both set before the test starts. At current traffic the window may close without reaching that count. That is reported as inconclusive, and the plan does not depend on it.
+- **Online stage** (challenger to champion): the model appears as one card in the app's compare view behind a flag, named AI Translate Cebuano, on free English to Cebuano comparisons only. It stays live until a better version replaces it or it is switched off. Votes are tracked per version, and first results are published after 30 days. Champion status needs a minimum vote count and win rate, both set before the model goes live. At current traffic that count may take a long time to reach. Until then the result is reported as inconclusive, and replacing a version depends on the gate, not on votes.
+- **A failed version is held back, not final.** It stays offline, users keep the current version, and the next attempt follows section 11.
 - Every promotion or rejection is written to the registry with its evidence.
 
 ### 9. Serving
@@ -146,14 +153,41 @@ Two separate questions, answered separately:
 - **Host:** a scale-to-zero GPU on Modal or RunPod, billed by the second. Training stays on Together. The adapter is exported and merged into the base model for self-hosting.
 - **Offline evaluation** uses the same host. A short-lived Together dedicated endpoint is the fallback if export or self-hosting is blocked.
 - **Live serving limits (M5):**
-  - The challenger runs only on English to Cebuano comparisons.
+  - The challenger runs only on free English to Cebuano comparisons. It stays off the app's `ALL_MODELS` list, because Pro comparisons accept anything on that list and could then select it for any language.
   - The app enforces a daily cap, starting at 50 requests, then carries on with the other models. This sets a firm spending limit that does not depend on any host feature.
   - The app wakes the model when a user selects Cebuano as the target language. At low traffic nearly every request finds the model asleep. The app gives each model 12 seconds and returns all answers together, so without this a sleeping challenger would stall the whole comparison, then fail and collect no vote.
-  - The live test runs for a fixed 30 days, then the results are published and the model is switched off.
+  - The model stays live under these limits, and the daily cap bounds serving costs for as long as it runs. First results are published after 30 days. The previous version's weights are kept, so the flag can switch back or off at any time.
+  - The about page names the serving host before the first live request, and the host must meet the page's promise not to store content or use it for training.
 - **Cold-start test (M4):** the live plan goes ahead if a pre-warmed model reliably answers within 12 seconds.
-- **Fallback, at no ongoing cost:** skip live hosting. Run the challenger offline on real voted inputs, have the Cebuano rater score the results blind, and record the demo through Ollama. The "ran it live" claim comes off the resume line.
+- **Fallback, at no ongoing cost:** skip live hosting. Run each passing version offline on public sentences, have raters score the results blind, and record the demo through Ollama. The loop continues offline. The "ran it live" claim comes off the resume line.
 - ai-lang-translation adds an OpenAI-compatible provider pointed at whichever host is chosen, mirroring `openrouter.ts`.
 - Local demo path: export the adapter and run it through Ollama for recordings, at zero cost.
+
+### 10. Rater app
+
+A small web app for native speakers to score and correct model output, in `flywheel/rater/`. Full reasoning is in `docs/decisions/0007`. The first version covers English to Cebuano, with the language pair set in config, and any number of raters.
+
+- **Spreadsheet first.** The M2 round uses a blind sheet from `flywheel rate export`, scored in Google Sheets and read back by `flywheel rate import`. A separate key file, which raters never see, records which model wrote each row. The app and the sheet share one rating format, so the app can be cut without touching evaluation or the gate.
+- **Rater flow.** A rater opens a private invite link, accepts terms covering training use and aggregate publication, reads the scale's written anchors, and works through one task at a time. Progress is saved after each task. Raters never see model names.
+- **Evaluation pool: scored only.** The frozen human-rated set, with outputs shuffled across models, scored 1 to 5 for adequacy and 1 to 5 for fluency. There is no correction box here, because this text must never reach training.
+- **Training pool: picks and corrections.** Sentences from the public corpora cleared at M3, never FLORES. A rater picks the better of two outputs, or corrects the translation. The existing leakage check still applies.
+- **Quality checks.** The queue hides known-good and deliberately wrong translations. A rater who misses them is excluded from that round. At least one rater scores the evaluation set twice, a few weeks apart, and reports show agreement within and between raters. The exclusion rule and minimum agreement are set before each round starts.
+- **Scoring.** A sentence's score is the mean across raters, and a model's score is the mean across sentences, with bootstrap intervals over sentences. Every rater scores the same outputs, so a harsh rater affects all models equally. Per-rater means are still reported.
+- **Service boundary.** The rater app is a separate FastAPI app from `flywheel/api/`, with only task and submit routes. The event and registry routes are never exposed publicly.
+- **Privacy.** Raters get a pseudonymous `rater_id` and a random invite token, stored hashed. The app stores no names or email addresses. Its database lives outside the repo. Raters see public text only (`docs/decisions/0009`).
+- **Hosting.** The cheapest small host that can hold a SQLite file, running only during rating rounds. Results are exported to local files when a round closes.
+- **Other languages.** A second pair needs config, a rater, a FLORES set and its own license and metric checks, but no new app code. It waits until Cebuano has worked end to end.
+
+### 11. Continuous improvement
+
+The loop keeps running after M5. Full reasoning is in `docs/decisions/0008`.
+
+- **Trigger.** A training run starts when enough new human examples have cleared curation, at a count set in config, within a monthly training budget. A calendar would pay for runs with nothing new to learn from. Runs are started by hand until the app pushes events directly at M7.
+- **Comparison.** Each version must beat the current live version through the same gate, with thresholds pre-registered for that run. Only candidates that pass the automated checks reach raters.
+- **A failed version.** It stays offline, users keep the current version, and it is logged. The next attempt needs new data, or a config change recorded before the run. If no version has passed yet, the live stage waits.
+- **Run history.** One public page, generated from the registry, shows each version's data, scores and whether it shipped.
+- **Test sets.** Tuning uses FLORES dev, and FLORES devtest is used only at the gate. Part of the human-rated set is replaced with fresh devtest sentences each round. Reports state how many times each set has been used.
+- **When gains flatten.** Votes stop helping once the model catches up with the models it learns from, and corrections can still help. The run history will show this, and it is the signal to collect more corrections rather than more votes.
 
 ---
 
@@ -162,13 +196,14 @@ Two separate questions, answered separately:
 1. **Baseline first.** Evaluating the app's existing models and three candidate base models on FLORES needs no user data and is a publishable result on its own.
 2. **SFT seed from public parallel data**, licenses checked per corpus. **Avoid anything derived from Cebuano Wikipedia**: it is overwhelmingly bot-generated and is a known trap for Cebuano corpora. Prefer OPUS sources with human origin (Tatoeba, bible-uedin, QED, GlobalVoices where available).
 3. **Synthetic preference pairs:** run several models on source sentences, rank outputs with chrF++ against references and the blind judge, build DPO pairs from the ranking. Labeled synthetic everywhere.
-4. **Real votes** join as they accumulate. Every dataset manifest and report shows the human versus synthetic share.
+4. **Real votes** join once the privacy page names the training provider, and only votes saved after that change. Every dataset manifest and report shows the human versus synthetic share.
+5. **Rater picks and corrections** join once the app is live. They reach the next training run after they are collected, so the first challenger does not benefit from them. Manifests count them separately from votes.
 
 ---
 
 ## Tech stack
 
-- **Python 3.12, uv, pydantic, typer (CLI), FastAPI (local service), SQLite.**
+- **Python 3.12, uv, pydantic, typer (CLI), FastAPI (local service and rater app), SQLite.**
 - **Metrics and judge:** sacrebleu, COMET (reported only), judge via the Anthropic or OpenAI SDK depending on the candidate families in play.
 - **Generated TypeScript client** (later): JSON Schema from pydantic, OpenAPI from FastAPI, generated types and client in `packages/client-ts`.
 - **Storage:** filesystem + SQLite (v1), S3 + DynamoDB (AWS).
@@ -191,7 +226,8 @@ feedback-flywheel/
     serve/       OpenAI-compatible client for the hosted adapter
     scrub.py     PII and secret removal, run at ingest
     api/         FastAPI service (events, registry, status)
-    cli.py       flywheel ingest | curate | build | train | eval | promote | report | serve
+    rater/       rater app: tasks, submissions, quality checks
+    cli.py       flywheel ingest | curate | rate | build | train | eval | promote | report | serve
   configs/       one file per training run and per eval set
   schemas/       generated JSON Schema, checked in CI
   scripts/       reproducible measurements behind decisions
@@ -208,18 +244,19 @@ feedback-flywheel/
 
 ## Milestones
 
-Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable repo at the end of M4** (about week 7). Reviewer value ranks: eval report, then training plus gate, then live integration, then AWS. Cuts happen in reverse order.
+Part-time pace. Roughly 11 to 14 weeks for M0 to M6, with a **minimum showable repo at the end of M4** (about week 9). A failed gate delays M5 until a later version passes, so M6 does not wait for M5. Reviewer value ranks: eval report, then training plus gate, then live integration, then AWS. Cuts happen in reverse order.
 
 | # | Milestone | Done when |
 |---|---|---|
 | M0 | Decisions and skeleton | Open decisions below answered and logged in `docs/decisions/`; verification items checked (LoRA serving, FLORES license); uv project, CI, license, README stub pushed to a public GitHub repo. **Built.** Other corpus licenses are checked when each corpus is added at M3. |
 | M1 | Schema, ingest, curation | `flywheel ingest` loads FLORES and a comparisons export into curated events; JSON Schema exported in CI; unit tests cover dedupe, PII scrubbing, leakage protection. **Built.** |
-| M2 | Eval harness and baseline | Baseline report on the chosen pair's FLORES devtest for the app's compare-set models and three candidate base models, with chrF++, judge win rates and confidence intervals, plus the first human-rated set. Base model chosen by headroom, from those that fit the cheapest GPU tier, can be exported, and are licensed for self-hosting. Published as the first write-up. |
-| M3 | Training and registry | A LoRA SFT model trained through Together from a versioned dataset and a checked-in run config, registered with dataset hash, cost and a model card. Then a DPO run on preference pairs. |
-| M4 | Promotion gates | `flywheel promote` runs the pre-registered gate against the base model and produces a challenger report, pass or fail, with evidence, plus the positioning report against production models. Cold-start test run and serving host chosen. **Minimum showable repo.** README leads with the result table and report link. |
-| M5 | Live integration | Challenger added to the app as a new `AIModel` (union, selector, dispatch, provider), in the free compare set for English to Cebuano only, behind a flag, with the daily cap and pre-warm in place. It runs for 30 days and its votes flow back through ingest. The loop is closed. If the M4 test fails, this milestone becomes the offline fallback in section 9. |
+| M2 | Eval harness and baseline | Baseline report on the chosen pair's FLORES devtest for the app's compare-set models and three candidate base models, with chrF++, judge win rates and confidence intervals, plus the first human-rated set, scored on a blind spreadsheet and loaded through the new rating schema. Base model chosen by headroom, from those that fit the cheapest GPU tier, can be exported, and are licensed for self-hosting. Published as the first write-up. |
+| M3 | Training and registry | A LoRA SFT model trained through Together from a versioned dataset and a checked-in run config, registered with dataset hash, cost and a model card. Then a DPO run on preference pairs. The comparisons adapter marks votes as not available for training until the privacy page names the provider. |
+| M4 | Rater app and promotion gates | Rater app live with several raters, picks, corrections and quality checks. Candidates that pass the automated checks are scored blind against their base model. `flywheel promote` runs the pre-registered gate, including the human check, and produces a challenger report, pass or fail, with evidence, plus the positioning report against production models. Cold-start test run and serving host chosen. If time runs short, the human round uses the spreadsheet instead. **Minimum showable repo.** README leads with the result table and report link. |
+| M5 | Live integration | Runs once a version passes the gate. About page names the serving host. Challenger added to the app as a new `AIModel` (union, dispatch, provider) named AI Translate Cebuano, in the free compare set for English to Cebuano only, off the `ALL_MODELS` list, behind a flag, with the daily cap and pre-warm in place. Its votes flow back through ingest, and first results are published after 30 days. The loop is closed. If the M4 test fails, this milestone becomes the offline fallback in section 9. |
 | M6 | Polish and launch | Architecture diagram, README walkthrough, short demo video, decision log complete, write-up with a "what I would do differently" section, LinkedIn post. Resume updated. |
-| M7 | Stretch | AWS deployment with OpenTofu; second training provider; generated TypeScript client and the app pushing events directly. |
+| M7 | Stretch | AWS deployment with OpenTofu; second training provider; generated TypeScript client and the app pushing events directly; a second language pair through the rater app. |
+| Ongoing | Continuous loop | Never finished. New versions train as human examples arrive, each one goes through the gate, and the run history grows. See section 11. |
 
 ## Cost estimate
 
@@ -227,7 +264,9 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 - One-time experimentation budget: $100 to $200.
 - No always-on GPU. COMET runs on the MacBook.
 - Offline evals run on the same small GPU as live serving, at about $0.59 an hour. A run may take about an hour, which has not been measured yet.
-- Live test at M5: about $1.50 a month at 5 Cebuano comparisons a day, and about $15 at most at the 50-a-day cap. Free host credits may cover this. These figures assume each request keeps the GPU awake for about 60 seconds, which M4 will measure.
+- Live serving from M5, ongoing: about $1.50 a month at 5 Cebuano comparisons a day, and about $15 at most at the 50-a-day cap. Free host credits may cover this. These figures assume each request keeps the GPU awake for about 60 seconds, which M4 will measure.
+- Ongoing training: paid per run, only when enough new human examples arrive, within a monthly budget set before the loop starts.
+- Rater app hosting: a small host that runs only during rating rounds, with a target of under $10 a month. Not priced yet. This assumes volunteer raters; paying them would be a separate budget.
 - Re-check provider prices at M0; GPU and fine-tuning prices have moved during 2026.
 
 ---
@@ -237,30 +276,40 @@ Part-time pace. Roughly 10 to 12 weeks for M0 to M6, with a **minimum showable r
 | Risk | Mitigation |
 |---|---|
 | No headroom: base model already matches the compare set | M2 ranks base candidates by headroom before any training. Choose the strongest base that is still clearly below the teachers on Cebuano. |
-| Metric validity on Cebuano | chrF++ is the gate metric; COMET is reported as unvalidated; human-rated set is the tie-breaker. |
-| Judge is not much better than the candidates | Judge from a different family, run in both orders, and the human set decides close calls. |
+| Metric validity on Cebuano | chrF++ is the gate metric; COMET is reported as unvalidated; the blind human check can veto a model. |
+| Judge is not much better than the candidates | Judge from a different family, run in both orders, and the blind human check can veto a model the judge favored. |
+| No native speaker available | The automated results are still published, so M4 stays showable, but the model stays a candidate and does not go live. |
+| Careless or inconsistent raters | Hidden known-good and wrong translations, agreement reporting, and exclusion rules set before each round. |
+| Rated text leaks into training | Evaluation tasks have no correction box, the training pool never uses FLORES, and the existing leakage check still runs. |
+| Rater app overruns its estimate | The app and spreadsheet share a rating format, so the round falls back to the spreadsheet. Label Studio or Argilla are the next option. |
 | Too little real feedback data | Baseline and synthetic pairs carry M2 to M4; every manifest and report states human versus synthetic share. |
 | Vote bias (names visible) | Votes used for training signal only, never for evaluation. Own-model pick rate reported. |
-| Live serving cost | Serverless LoRA is gone, so the challenger runs on a scale-to-zero GPU. English to Cebuano only, a daily cap enforced in the app and a 30-day window keep the cost bounded. |
+| Live serving cost | Serverless LoRA is gone, so the challenger runs on a scale-to-zero GPU. English to Cebuano only and a daily cap enforced in the app keep the cost bounded for as long as it runs. |
 | Challenger cold starts stall comparisons and collect few votes | The app pre-warms the model when Cebuano is selected. The M4 test confirms this works before anything goes live, and the offline fallback costs nothing. |
 | Adapter cannot be exported or self-hosted | Confirm export and the base model's license before choosing the base at M2. Fall back to a short-lived Together endpoint for evals. |
 | Corpus licenses and quality | Check each corpus. FLORES-200 is CC-BY-SA and is eval-only. NLLB-200 weights are CC-BY-NC, so no NLLB in anything commercial. No Cebuano Wikipedia derivatives. |
 | Timeline | Minimum showable repo at M4. M5 to M7 are additive; each can be cut without hollowing out what is already published. |
-| Fine-tuned model is worse | That is a valid result. The gate rejecting it, with evidence, is a feature to show, not a failure to hide. |
+| A new version is worse | It stays offline, users keep the current version, and it is logged in the run history. The next version trains on more data. The gate catching it is the system working. |
+| Repeated runs overfit the test sets | Tuning uses FLORES dev, devtest is used only at the gate, and part of the human-rated set is replaced each round. |
+| Rater time runs out | Only candidates that pass the automated checks reach raters. |
+| User text reaches an undisclosed party | Raters see public text only. Votes reach training, and the live model reaches its host, only after the about page names the provider. |
 
 ---
 
 ## Open decisions
 
-1. **Repo name.** Working name `feedback-flywheel`.
+1. **Repo name.** Decided: `feedback-flywheel`.
 2. **First language pair.** English to Cebuano. Tier C in the community model plan, in FLORES-200, and sanity-checkable in Cebu. The metric caveats above are accepted as part of the story.
 3. **Base model.** Chosen at M2 by headroom from Together's LoRA fine-tuning list. Candidates include Qwen3.5 4B and 9B, Gemma 4 26B A4B and Llama 3.1 8B. Gemma 4 31B IT is on that list too and is also a teacher in the app's free compare set, but a teacher has no headroom over itself, so a smaller Gemma is the cleaner distillation story. A small base is preferred because it must fit the cheapest GPU tier. Confirm that the adapter can be exported and that the license allows self-hosting.
 4. **License.** Decided: Apache 2.0. It covers the code only; datasets keep their own licenses.
-5. **Native speaker for the human-rated set.** One person, about 100 sentences, scored twice a few weeks apart for consistency.
+5. **Native speakers for the human-rated set.** At least one person for about 100 sentences, scored twice a few weeks apart for consistency. More raters are welcome, and the app supports them from M4. Needed for M2 and for the gate at M4.
 6. **Live serving host.** Modal or RunPod, chosen at M4 from the cold-start test. See `docs/decisions/0005`.
+7. **Rater app host.** Chosen at M4. See `docs/decisions/0007`.
+8. **Real user text.** Decided: raters see public text only, and real votes reach training only after the privacy page names the provider. See `docs/decisions/0009`.
+9. **Loop settings.** The retrain count, the monthly training budget and the champion vote target. Set before the model goes live.
 
 ## Resume line when shipped
 
-> Built and open-sourced a human-feedback model improvement pipeline in Python (preference curation, LoRA SFT and DPO, blind evaluation with bootstrap confidence intervals, pre-registered promotion gates) and ran it live behind translate.moretosay.org, where a fine-tuned challenger competes in the product's compare view. [N] human votes, [X]-point chrF++ gain over base on FLORES-200 Cebuano, 95% CI [a, b].
+> Built and open-sourced a human-feedback model improvement pipeline in Python (preference curation, LoRA SFT and DPO, a native-speaker rating app, blind evaluation with bootstrap confidence intervals, pre-registered promotion gates) and ran it as a continuous loop behind translate.moretosay.org, where gate-approved fine-tuned versions compete in the product's compare view. [N] human votes, [X]-point chrF++ gain over base on FLORES-200 Cebuano, 95% CI [a, b].
 
 Fill in the bracketed numbers from the M4 report. If the gain is zero or negative, the line says so and leads with the gate instead. If the offline fallback is used, replace the live claim with the blind human evaluation.

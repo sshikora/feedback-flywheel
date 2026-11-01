@@ -13,3 +13,4 @@ One short file per decision, so a reader can see the reasoning as well as the ou
 | [0007](0007-rater-app.md) | Native-speaker rater app, with a spreadsheet first | Accepted |
 | [0008](0008-continuous-loop.md) | Keep the loop running after launch | Accepted |
 | [0009](0009-real-user-text.md) | Keep real user text from raters and undisclosed providers | Accepted |
+| [0010](0010-evaluation-harness.md) | How the evaluation harness runs | Accepted |

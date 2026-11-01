@@ -17,7 +17,8 @@ Early. There are no model results yet, and this section will lead with them once
 | Event schema, JSON Schema export | Done |
 | Ingest: JSONL, comparisons export, FLORES-200 | Done |
 | Curation: PII and secret scrubbing, dedupe, quality scoring, leakage protection | Done |
-| Evaluation harness and baseline | Next |
+| Evaluation harness: chrF++, blind judge, human ratings, HTML report | Built, and tested on 3 sentences with real models |
+| Baseline results | Next |
 | Training, registry, promotion gates | Planned |
 | Live integration | Planned |
 
@@ -35,6 +36,18 @@ uv run flywheel curate
 ```
 
 Output lands in `data/`, which is never committed. `data/curated/report.json` has the counts behind each decision: what was dropped and why, the human versus synthetic share, and vote statistics by model.
+
+### Evaluate models
+
+These commands show their plan and spend nothing until you add `--yes`. Translation needs `OPENROUTER_API_KEY` and the judge needs `ANTHROPIC_API_KEY`.
+
+```sh
+uv run flywheel eval translate --limit 3      # a small test first, then without --limit
+uv run flywheel eval judge
+uv run flywheel report                        # free, and can be rerun at any time
+```
+
+The report is written to `data/runs/`. For human scoring, `flywheel rate export --round m2-a` writes a blind sheet and a separate key, and `flywheel rate import` loads the scores. Raters follow [docs/rating-guide.md](docs/rating-guide.md).
 
 ## How curation protects the evaluation
 

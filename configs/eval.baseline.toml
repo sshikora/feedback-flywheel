@@ -1,0 +1,45 @@
+# The M2 baseline: the app's free compare set against three candidate base models.
+# Model outputs are stored, so scores can be recomputed without paying again.
+
+name = "baseline-en-ceb"
+eval_set = "flores200-devtest-en-ceb"
+resamples = 2000              # bootstrap resamples behind every confidence interval
+seed = "flywheel-v1"          # changing this changes the judged and rated sentences
+max_cost_usd = 5.0            # translation stops if reported spend passes this
+
+[[models]]
+id = "google/gemini-3.8-flash"
+role = "compare"
+reasoning_effort = "low"      # it refuses reasoning off, and the app sets its thinking to low
+
+[[models]]
+id = "deepseek/deepseek-v4.1-flash-1017"
+role = "compare"
+
+[[models]]
+id = "google/gemma-4-31b-it"
+role = "compare"
+
+[[models]]
+id = "google/gemma-4-26b-a4b-it"
+role = "base"
+
+[[models]]
+id = "qwen/qwen3.5-9b"
+role = "base"
+
+[[models]]
+id = "meta-llama/llama-3.1-8b-instruct"
+role = "base"
+
+[judge]
+model = "claude-opus-5-5"     # a different family from every candidate
+family = "anthropic"
+effort = "low"
+sentences = 200               # each base meets each compare model on these, in both orders
+
+[rating]
+sentences = 100               # the frozen human-rated set
+checks = 5                    # hidden known-good rows, and as many deliberately wrong rows
+min_check_pass = 0.8          # a rater below this is left out of that round
+min_agreement = 0.667         # Krippendorff's alpha below this is flagged in the report

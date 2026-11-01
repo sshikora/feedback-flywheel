@@ -1,6 +1,6 @@
 # Feedback Flywheel: Project Plan
 
-**Status:** M0 and M1 built. Live serving is decided, subject to a cold-start test at M4 (see `docs/decisions/0005`). A native-speaker rater app is added at M4 (see `docs/decisions/0007`). The loop keeps running after launch (see `docs/decisions/0008`).
+**Status:** M0 and M1 built. The M2 harness is built, and the baseline run is next. Live serving is decided, subject to a cold-start test at M4 (see `docs/decisions/0005`). A native-speaker rater app is added at M4 (see `docs/decisions/0007`). The loop keeps running after launch (see `docs/decisions/0008`).
 **Last updated:** 2026-11-01
 **Owner:** seth
 **Related:** `~/source/ai-lang-translation/docs/plans/community-trained-model.md` (product strategy for the in-app side), `~/source/ai-lang-translation/docs/plans/compare-and-vote.md` (the vote data this project consumes)
@@ -120,8 +120,8 @@ Cebuano is a low-resource language, and that breaks two of the three usual metri
 
 - **Eval sets:** FLORES-200 devtest for the chosen language pair (fixed benchmark, about 1,000 sentences), a held-out set of community-preferred pairs once there are enough, and a **human-rated set** of about 100 FLORES devtest sentences, selected by a fixed seed and scored blind by native speakers for adequacy and fluency (section 10).
 - **Primary metric: chrF++** via sacrebleu. It is language-agnostic and reference-based, so it is valid for Cebuano.
-- **COMET is reported, not trusted.** COMET's backbone (XLM-R) does not cover Cebuano, so its scores are unvalidated for this pair. Reports label it as such. If MetricX or a Cebuano-validated metric appears, swap it in.
-- **LLM-as-judge:** pairwise, blind to model names, run in both orders to cancel position bias, reported as win rate. The judge must be a model from a **different family than any candidate**, to avoid self-preference bias. The write-up notes that frontier models are only moderately competent in Cebuano, which is why the human-rated set can veto a model at the gate.
+- **COMET is reported, not trusted.** COMET's backbone (XLM-R) does not cover Cebuano, so its scores are unvalidated for this pair. Reports will label it as such. It is deferred past M2, because the baseline does not depend on it. If MetricX or a Cebuano-validated metric appears, swap it in.
+- **LLM-as-judge:** pairwise, blind to model names, run in both orders to cancel position bias, reported as win rate. It sees no reference, and each base meets each compare model on 200 sentences (`docs/decisions/0010`). The judge must be a model from a **different family than any candidate**, to avoid self-preference bias. The write-up notes that frontier models are only moderately competent in Cebuano, which is why the human-rated set can veto a model at the gate.
 - **Statistics:** bootstrap confidence intervals on every score. A difference inside the interval is reported as a tie.
 - **Reports:** one static HTML page per run (scores, intervals, per-sentence diffs, worst regressions, human versus synthetic share of training data). These double as portfolio artifacts.
 
@@ -204,7 +204,7 @@ The loop keeps running after M5. Full reasoning is in `docs/decisions/0008`.
 ## Tech stack
 
 - **Python 3.12, uv, pydantic, typer (CLI), FastAPI (local service and rater app), SQLite.**
-- **Metrics and judge:** sacrebleu, COMET (reported only), judge via the Anthropic or OpenAI SDK depending on the candidate families in play.
+- **Metrics and judge:** sacrebleu, COMET (reported only, later), OpenRouter for candidate models, and the Anthropic SDK with Claude Opus 5.5 on the Batches API for the judge.
 - **Generated TypeScript client** (later): JSON Schema from pydantic, OpenAPI from FastAPI, generated types and client in `packages/client-ts`.
 - **Storage:** filesystem + SQLite (v1), S3 + DynamoDB (AWS).
 - **Infra (stretch):** OpenTofu for S3, DynamoDB, Lambda, Step Functions.
@@ -250,7 +250,7 @@ Part-time pace. Roughly 11 to 14 weeks for M0 to M6, with a **minimum showable r
 |---|---|---|
 | M0 | Decisions and skeleton | Open decisions below answered and logged in `docs/decisions/`; verification items checked (LoRA serving, FLORES license); uv project, CI, license, README stub pushed to a public GitHub repo. **Built.** Other corpus licenses are checked when each corpus is added at M3. |
 | M1 | Schema, ingest, curation | `flywheel ingest` loads FLORES and a comparisons export into curated events; JSON Schema exported in CI; unit tests cover dedupe, PII scrubbing, leakage protection. **Built.** |
-| M2 | Eval harness and baseline | Baseline report on the chosen pair's FLORES devtest for the app's compare-set models and three candidate base models, with chrF++, judge win rates and confidence intervals, plus the first human-rated set, scored on a blind spreadsheet and loaded through the new rating schema. Base model chosen by headroom, from those that fit the cheapest GPU tier, can be exported, and are licensed for self-hosting. Published as the first write-up. |
+| M2 | Eval harness and baseline | Baseline report on the chosen pair's FLORES devtest for the app's compare-set models and three candidate base models, with chrF++, judge win rates and confidence intervals, plus the first human-rated set, scored on a blind spreadsheet and loaded through the new rating schema. Base model chosen by headroom, from those that fit the cheapest GPU tier, can be exported, and are licensed for self-hosting. Published as the first write-up. **Harness built,** and translation and the judge tested on 3 sentences. The full run and the first human round are next. |
 | M3 | Training and registry | A LoRA SFT model trained through Together from a versioned dataset and a checked-in run config, registered with dataset hash, cost and a model card. Then a DPO run on preference pairs. The comparisons adapter marks votes as not available for training until the privacy page names the provider. |
 | M4 | Rater app and promotion gates | Rater app live with several raters, picks, corrections and quality checks. Candidates that pass the automated checks are scored blind against their base model. `flywheel promote` runs the pre-registered gate, including the human check, and produces a challenger report, pass or fail, with evidence, plus the positioning report against production models. Cold-start test run and serving host chosen. If time runs short, the human round uses the spreadsheet instead. **Minimum showable repo.** README leads with the result table and report link. |
 | M5 | Live integration | Runs once a version passes the gate. About page names the serving host. Challenger added to the app as a new `AIModel` (union, dispatch, provider) named AI Translate Cebuano, in the free compare set for English to Cebuano only, off the `ALL_MODELS` list, behind a flag, with the daily cap and pre-warm in place. Its votes flow back through ingest, and first results are published after 30 days. The loop is closed. If the M4 test fails, this milestone becomes the offline fallback in section 9. |
@@ -263,6 +263,7 @@ Part-time pace. Roughly 11 to 14 weeks for M0 to M6, with a **minimum showable r
 - Development: about $20 to $75 a month (hosted fine-tuning per token, eval API calls).
 - One-time experimentation budget: $100 to $200.
 - No always-on GPU. COMET runs on the MacBook.
+- M2 baseline run: about $5. Translation is about $0.30, scaled from a 3-sentence test, and the judge is about $4.60, scaled from 54 test comparisons.
 - Offline evals run on the same small GPU as live serving, at about $0.59 an hour. A run may take about an hour, which has not been measured yet.
 - Live serving from M5, ongoing: about $1.50 a month at 5 Cebuano comparisons a day, and about $15 at most at the 50-a-day cap. Free host credits may cover this. These figures assume each request keeps the GPU awake for about 60 seconds, which M4 will measure.
 - Ongoing training: paid per run, only when enough new human examples arrive, within a monthly budget set before the loop starts.

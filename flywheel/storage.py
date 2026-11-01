@@ -35,3 +35,12 @@ def _write_atomic(path: Path, content: str) -> None:
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(content, encoding="utf-8")
     os.replace(temporary, path)
+
+
+def append_jsonl(path: Path, records: Iterable[BaseModel]) -> None:
+    """Add records as they finish, so a crash keeps the work already paid for."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as file:
+        for record in records:
+            file.write(record.model_dump_json() + "\n")
+        file.flush()

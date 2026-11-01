@@ -1,0 +1,66 @@
+{
+  "additionalProperties": false,
+  "description": "One rater's blind score. The spreadsheet and the rater app both produce these.",
+  "properties": {
+    "segment_id": {
+      "title": "Segment Id",
+      "type": "string"
+    },
+    "model_id": {
+      "title": "Model Id",
+      "type": "string"
+    },
+    "rater_id": {
+      "description": "Pseudonymous. Never a name or email.",
+      "minLength": 1,
+      "title": "Rater Id",
+      "type": "string"
+    },
+    "round": {
+      "minLength": 1,
+      "title": "Round",
+      "type": "string"
+    },
+    "adequacy": {
+      "description": "How much of the meaning survived.",
+      "maximum": 5,
+      "minimum": 1,
+      "title": "Adequacy",
+      "type": "integer"
+    },
+    "fluency": {
+      "description": "How natural it sounds.",
+      "maximum": 5,
+      "minimum": 1,
+      "title": "Fluency",
+      "type": "integer"
+    },
+    "check": {
+      "anyOf": [
+        {
+          "enum": [
+            "good",
+            "wrong"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Set on hidden quality checks, which are never model scores.",
+      "title": "Check"
+    }
+  },
+  "required": [
+    "segment_id",
+    "model_id",
+    "rater_id",
+    "round",
+    "adequacy",
+    "fluency"
+  ],
+  "title": "HumanRating",
+  "type": "object"
+}

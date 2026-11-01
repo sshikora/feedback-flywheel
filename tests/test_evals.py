@@ -160,6 +160,7 @@ class TestOpenRouter:
         assert answer == translate.Completion("Kumusta", 0.01)
         assert seen["provider"] == {"data_collection": "deny", "zdr": True}
         assert seen["reasoning"] == {"enabled": False}
+        assert seen["max_tokens"] == translate.MAX_TOKENS
 
     def test_retries_rate_limits_and_server_errors(self):
         responses = [httpx.Response(429), httpx.Response(503), success()]
@@ -597,6 +598,33 @@ class TestReport:
         row = next(m for m in built["models"] if m["model"] == BASE)
         assert row["failed"] == 1
         assert row["chrf"]["value"] < 100
+
+    def test_a_runaway_answer_counts_as_failed(self):
+        segments = make_segments(20)
+        inputs = make_inputs(segments, lambda s: s.reference[:8])
+        runaway = make_inputs(
+            segments,
+            lambda s: s.reference[:8],
+            lambda s: "human " * 5000 if s == segments[0] else s.reference,
+        )
+        assert (TEACHER, segments[0].id) not in report.stored_outputs(runaway)
+        built = report.build_report(runaway)
+        row = next(m for m in built["models"] if m["model"] == TEACHER)
+        assert (row["failed"], row["runaway"]) == (1, 1)
+        assert row["chrf"]["value"] > 90
+        assert report.build_report(inputs)["best_compare"] == TEACHER
+
+    def test_every_model_gets_the_same_runaway_rule(self):
+        segments = make_segments(4)
+        long_answer = "x" * (len(segments[0].source) * 5 + 1)
+        inputs = make_inputs(segments, lambda s: long_answer, lambda s: long_answer)
+        assert report.stored_outputs(inputs) == {}
+
+    def test_an_answer_at_the_limit_is_kept(self):
+        segments = make_segments(1)
+        at_limit = "x" * (len(segments[0].source) * 5)
+        inputs = make_inputs(segments, lambda s: at_limit)
+        assert (BASE, segments[0].id) in report.stored_outputs(inputs)
 
     def test_flags_partial_runs(self):
         segments = make_segments(10)

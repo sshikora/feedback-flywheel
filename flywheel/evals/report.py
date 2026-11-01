@@ -37,7 +37,17 @@ def _interval_json(interval: Interval) -> dict[str, float]:
 
 
 def stored_outputs(inputs: EvalInputs) -> dict[tuple[str, str], str]:
-    return {key: r.output for key, r in inputs.translations.items() if r.output is not None}
+    """Usable answers. A runaway answer counts as failed, under the same rule for every model.
+
+    One repeated phrase can run to thousands of times the normal length. Corpus chrF++ sums
+    characters, so that single answer would otherwise decide a model's whole score.
+    """
+    limits = {s.id: len(s.source) * inputs.config.max_output_ratio for s in inputs.segments}
+    return {
+        key: record.output
+        for key, record in inputs.translations.items()
+        if record.output is not None and len(record.output) <= limits[record.segment_id]
+    }
 
 
 def _judge_rows(
@@ -148,12 +158,15 @@ def build_report(inputs: EvalInputs) -> dict[str, Any]:
     models: list[dict[str, Any]] = []
     for model in config.models:
         records = [r for key, r in inputs.translations.items() if key[0] == model.id]
+        usable = sum((model.id, s.id) in outputs for s in segments)
+        answered = sum(r.output is not None for r in records)
         models.append(
             {
                 "model": model.id,
                 "role": model.role,
                 "chrf": _interval_json(metrics.chrf_interval(stats[model.id], weights)),
-                "failed": len(segments) - sum(r.output is not None for r in records),
+                "failed": len(segments) - usable,
+                "runaway": answered - usable,
                 "cost_usd": round(sum(r.cost_usd for r in records), 4),
             }
         )
@@ -173,7 +186,7 @@ def build_report(inputs: EvalInputs) -> dict[str, Any]:
                 "has_headroom": gap.low > 0,
             }
         )
-    usable = [row for row in headroom if row["has_headroom"]]
+    with_headroom = [row for row in headroom if row["has_headroom"]]
 
     worst: dict[str, list[dict[str, Any]]] = {}
     for base in config.model_ids("base"):
@@ -203,7 +216,7 @@ def build_report(inputs: EvalInputs) -> dict[str, Any]:
         "best_compare": teacher,
         "models": models,
         "headroom": headroom,
-        "recommended_base": usable[0]["model"] if usable else None,
+        "recommended_base": with_headroom[0]["model"] if with_headroom else None,
         "judge": {
             "model": config.judge.model,
             "pairs": _judge_rows(inputs, segments, outputs),
@@ -313,9 +326,15 @@ def render_html(report: dict[str, Any]) -> str:
     parts.append("<h2>chrF++ on the benchmark</h2>")
     parts.append(
         _table(
-            ["Model", "Role", "chrF++", "Failed"],
+            ["Model", "Role", "chrF++", "Failed", "Of which runaway"],
             [
-                [_text(m["model"]), _text(m["role"]), _range(m["chrf"]), str(m["failed"])]
+                [
+                    _text(m["model"]),
+                    _text(m["role"]),
+                    _range(m["chrf"]),
+                    str(m["failed"]),
+                    str(m["runaway"]),
+                ]
                 for m in report["models"]
             ],
             numeric_from=2,

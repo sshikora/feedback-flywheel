@@ -6,6 +6,7 @@ eval_set = "flores200-devtest-en-ceb"
 resamples = 2000              # bootstrap resamples behind every confidence interval
 seed = "flywheel-v1"          # changing this changes the judged and rated sentences
 max_cost_usd = 5.0            # translation stops if reported spend passes this
+max_output_ratio = 5.0        # an answer this many times longer than its source counts as failed
 
 [[models]]
 id = "google/gemini-3.8-flash"

@@ -263,7 +263,7 @@ Part-time pace. Roughly 11 to 14 weeks for M0 to M6, with a **minimum showable r
 - Development: about $20 to $75 a month (hosted fine-tuning per token, eval API calls).
 - One-time experimentation budget: $100 to $200.
 - No always-on GPU. COMET runs on the MacBook.
-- M2 baseline run: about $5. Translation is about $0.30, scaled from a 3-sentence test, and the judge is about $4.60, scaled from 54 test comparisons.
+- M2 baseline run: about $5. Translation cost $0.57, including $0.25 for one runaway answer, and the judge is about $4.60, scaled from 54 test comparisons.
 - Offline evals run on the same small GPU as live serving, at about $0.59 an hour. A run may take about an hour, which has not been measured yet.
 - Live serving from M5, ongoing: about $1.50 a month at 5 Cebuano comparisons a day, and about $15 at most at the 50-a-day cap. Free host credits may cover this. These figures assume each request keeps the GPU awake for about 60 seconds, which M4 will measure.
 - Ongoing training: paid per run, only when enough new human examples arrive, within a monthly budget set before the loop starts.

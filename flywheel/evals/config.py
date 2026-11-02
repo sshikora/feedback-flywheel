@@ -42,6 +42,9 @@ class EvalConfig(Settings):
     resamples: int = Field(default=2000, ge=100)
     seed: str = "flywheel-v1"
     max_cost_usd: float = Field(default=5.0, gt=0, description="Stops translation at this spend.")
+    max_output_ratio: float = Field(
+        default=5.0, gt=1, description="Longer than this many times the source is a failed answer."
+    )
 
     @model_validator(mode="after")
     def _judge_is_a_different_family(self) -> Self:

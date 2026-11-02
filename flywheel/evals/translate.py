@@ -20,6 +20,7 @@ from flywheel.storage import append_jsonl, read_jsonl
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 ATTEMPTS = 5
 WORKERS = 8
+MAX_TOKENS = 4096  # stops a model that repeats itself. The app uses this on its Gemini fallback.
 
 # The app sends these on every OpenRouter request. See providers/openrouter.ts.
 ROUTING = {"provider": {"data_collection": "deny", "zdr": True}}
@@ -71,6 +72,7 @@ class OpenRouter:
         body = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": MAX_TOKENS,
             "usage": {"include": True},
             **ROUTING,
             "reasoning": {"effort": effort} if effort else {"enabled": False},

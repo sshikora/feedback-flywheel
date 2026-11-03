@@ -44,8 +44,11 @@ def flores_cache(tmp_path, monkeypatch):
 
 def test_ingest_then_curate(tmp_path, flores_cache):
     data = tmp_path / "data"
-    output = run("ingest", "comparisons", FIXTURE, "--data-dir", data)
+    output = run(
+        "ingest", "comparisons", FIXTURE, "--data-dir", data, "--training-from", "2026-10-27"
+    )
     assert "skipped 2 (no_vote)" in output
+    assert "2 of 2 votes cleared for training" in output
     assert "stored 2 events" in output
 
     output = run("ingest", "flores", "--data-dir", data, "--cache-dir", flores_cache)

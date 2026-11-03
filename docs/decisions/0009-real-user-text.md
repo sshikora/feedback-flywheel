@@ -19,4 +19,4 @@
 
 **Consequences.** Early models contain less vote data, and the fallback no longer measures real inputs. Older votes can still be used locally for aggregate vote statistics, which the page already allows.
 
-The comparisons adapter currently sets `consent.training` to true for every vote. That must change before the first upload at M3. Curation already drops events without training consent, so no other pipeline change is needed for this rule.
+The comparisons adapter sets `consent.training` to false unless `flywheel ingest comparisons --training-from` gives the date of the privacy change, and then only for votes cast from that time on. Curation already drops events without training consent, so no other pipeline change is needed for this rule.

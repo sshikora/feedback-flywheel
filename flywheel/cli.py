@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -53,11 +54,25 @@ def ingest_jsonl(path: Path, name: str = "jsonl", data_dir: DataDir = Path("data
 
 
 @ingest_app.command("comparisons")
-def ingest_comparisons(path: Path, data_dir: DataDir = Path("data")) -> None:
+def ingest_comparisons(
+    path: Path,
+    data_dir: DataDir = Path("data"),
+    training_from: Annotated[
+        datetime | None,
+        typer.Option(
+            help="When the privacy page began naming the training provider, in UTC. "
+            "Only votes from then on may train. Without it, none may."
+        ),
+    ] = None,
+) -> None:
     """Import an export of the translation app's comparisons table."""
-    result = comparisons.load_comparisons(path)
+    if training_from is not None and training_from.tzinfo is None:
+        training_from = training_from.replace(tzinfo=UTC)
+    result = comparisons.load_comparisons(path, training_from)
     for reason, count in sorted(result.skipped.items()):
         typer.echo(f"skipped {count} ({reason})")
+    cleared = sum(event.consent.training for event in result.events)
+    typer.echo(f"{cleared} of {len(result.events)} votes cleared for training")
     _store_events(result.events, "comparisons", data_dir)
 
 

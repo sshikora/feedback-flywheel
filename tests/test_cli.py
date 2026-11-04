@@ -67,6 +67,12 @@ def test_ingest_then_curate(tmp_path, flores_cache):
     assert report["train_origin"]["human_share"] == 1.0
     assert report["vote_statistics"]["blind_share"] == 0.0
 
+    output = run("build", "sft", "--data-dir", data)
+    assert "built" in output and "(1 examples, 1 events)" in output
+    (snapshot,) = (data / "datasets").iterdir()
+    assert snapshot.name.startswith("sft-")
+    assert "already built, unchanged" in run("build", "sft", "--data-dir", data)
+
 
 def test_ingest_never_writes_a_secret_or_personal_data(tmp_path):
     secret = "sk-" + "abc123" * 5

@@ -1,0 +1,95 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "origin": {
+      "enum": [
+        "human",
+        "synthetic"
+      ],
+      "title": "Origin",
+      "type": "string"
+    },
+    "src_lang": {
+      "title": "Src Lang",
+      "type": "string"
+    },
+    "tgt_lang": {
+      "title": "Tgt Lang",
+      "type": "string"
+    },
+    "tone": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tone"
+    },
+    "source": {
+      "minLength": 1,
+      "title": "Source",
+      "type": "string"
+    },
+    "chosen": {
+      "minLength": 1,
+      "title": "Chosen",
+      "type": "string"
+    },
+    "chosen_models": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Chosen Models",
+      "type": "array"
+    },
+    "rejected": {
+      "minLength": 1,
+      "title": "Rejected",
+      "type": "string"
+    },
+    "rejected_model": {
+      "title": "Rejected Model",
+      "type": "string"
+    },
+    "support": {
+      "description": "Independent votes for the chosen answer.",
+      "minimum": 1,
+      "title": "Support",
+      "type": "integer"
+    },
+    "close": {
+      "description": "True when chosen and rejected are near-identical, which is a weak signal.",
+      "title": "Close",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "event_id",
+    "origin",
+    "src_lang",
+    "tgt_lang",
+    "source",
+    "chosen",
+    "chosen_models",
+    "rejected",
+    "rejected_model",
+    "support",
+    "close"
+  ],
+  "title": "DpoPair",
+  "type": "object"
+}

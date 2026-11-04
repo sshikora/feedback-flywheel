@@ -32,6 +32,7 @@ The first four are the translation app's models. The smaller ones are candidates
 | Baseline: machine scores | Done |
 | Baseline: first native-speaker round | In progress |
 | Base model checks: export, license, GPU fit | Done, see [0011](docs/decisions/0011-base-model-checks.md) |
+| Datasets: SFT and DPO builders, hashed snapshots, data cards | Done |
 | Training, registry, promotion gates | Planned |
 | Live integration | Planned |
 
@@ -46,9 +47,10 @@ uv sync
 uv run flywheel ingest flores --src en --tgt ceb --split devtest
 uv run flywheel ingest comparisons tests/fixtures/comparisons_scan.json --training-from 2026-10-27
 uv run flywheel curate
+uv run flywheel build sft    # and `build dpo`
 ```
 
-Votes may train only if they were cast after `--training-from`, the date the app's privacy page began naming the training provider. Without it, none may. Output lands in `data/`, which is never committed. `data/curated/report.json` has the counts behind each decision: what was dropped and why, the human versus synthetic share, and vote statistics by model.
+Votes may train only if they were cast after `--training-from`, the date the app's privacy page began naming the training provider. Without it, none may. Output lands in `data/`, which is never committed. `data/curated/report.json` has the counts behind each decision: what was dropped and why, the human versus synthetic share, and vote statistics by model. Each build writes a snapshot to `data/datasets/`, named by the hash of its examples, with a manifest and a data card.
 
 ### Evaluate models
 

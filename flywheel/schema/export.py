@@ -9,13 +9,22 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from flywheel.schema import CuratedEvent, EvalSegment, FeedbackEvent, HumanRating
+from flywheel.schema import (
+    CuratedEvent,
+    DpoPair,
+    EvalSegment,
+    FeedbackEvent,
+    HumanRating,
+    SftExample,
+)
 
 EXPORTED: dict[str, type[BaseModel]] = {
     "feedback_event": FeedbackEvent,
     "curated_event": CuratedEvent,
     "eval_segment": EvalSegment,
     "human_rating": HumanRating,
+    "sft_example": SftExample,
+    "dpo_pair": DpoPair,
 }
 
 

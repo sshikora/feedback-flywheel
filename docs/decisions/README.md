@@ -15,3 +15,4 @@ One short file per decision, so a reader can see the reasoning as well as the ou
 | [0009](0009-real-user-text.md) | Keep real user text from raters and undisclosed providers | Accepted |
 | [0010](0010-evaluation-harness.md) | How the evaluation harness runs | Accepted |
 | [0011](0011-base-model-checks.md) | Base model checks: L4 tier, Qwen3.5 9B leads | Checks done, choice pending human round |
+| [0012](0012-dataset-builds.md) | How training datasets are built | Accepted |

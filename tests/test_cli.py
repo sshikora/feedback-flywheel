@@ -1,6 +1,7 @@
 """End to end through the command line, with fixture data only."""
 
 import json
+import re
 import tarfile
 from io import BytesIO
 from pathlib import Path
@@ -22,6 +23,14 @@ def run(*args: object) -> str:
     result = runner.invoke(app, [str(arg) for arg in args], catch_exceptions=False)
     assert result.exit_code == 0, result.output
     return result.output
+
+
+def fail(*args: object) -> str:
+    """The error text of a refused command, without the colors, box and wrapping around it."""
+    result = runner.invoke(app, [str(arg) for arg in args])
+    assert result.exit_code != 0, result.output
+    text = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    return " ".join(re.sub(r"[│╭╮╰╯─]", " ", text).split())
 
 
 @pytest.fixture
@@ -132,16 +141,10 @@ def test_build_register_and_card(tmp_path):
     assert "**Cost:** $3.50" in card
 
     run_config.write_text(run_config.read_text().replace("epochs = 3", "epochs = 4"))
-    changed = runner.invoke(app, ["registry", "card", "v1", "--data-dir", str(data)])
-    assert changed.exit_code != 0
-    assert "has changed since v1 was trained" in changed.output
+    assert "has changed since v1 was trained" in fail("registry", "card", "v1", "--data-dir", data)
 
 
 def test_a_run_config_must_name_a_built_snapshot(tmp_path):
     example = Path(__file__).parent.parent / "configs" / "run.example.toml"
-    result = runner.invoke(
-        app,
-        ["registry", "add", str(example), "--provider", "together", "--data-dir", str(tmp_path)],
-    )
-    assert result.exit_code != 0
-    assert "has hash" in result.output
+    output = fail("registry", "add", example, "--provider", "together", "--data-dir", tmp_path)
+    assert f"has hash {'0' * 64}" in output

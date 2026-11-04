@@ -19,7 +19,7 @@ import anthropic
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 from anthropic.types.messages.batch_create_params import Request
 
-from flywheel.evals.translate import LANGUAGE_NAMES
+from flywheel.prompts import LANGUAGE_NAMES
 from flywheel.schema import EvalSegment, JudgeVerdict
 from flywheel.storage import read_jsonl, write_json
 

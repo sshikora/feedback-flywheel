@@ -9,6 +9,7 @@ base_model = "Qwen/Qwen3.5-9B"
 method = "sft"
 dataset = "0000000000000000000000000000000000000000000000000000000000000000"  # from flywheel build
 seed = 1
+max_cost_usd = 10.0       # refused if Together's estimate is higher. Jobs cost at least $4.
 
 [hyperparameters]
 epochs = 3

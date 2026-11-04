@@ -37,6 +37,11 @@
       "default": null,
       "title": "Tone"
     },
+    "auto_detect": {
+      "description": "The user left the source language on auto, so the app asked for JSON.",
+      "title": "Auto Detect",
+      "type": "boolean"
+    },
     "source": {
       "minLength": 1,
       "title": "Source",
@@ -69,6 +74,7 @@
     "origin",
     "src_lang",
     "tgt_lang",
+    "auto_detect",
     "source",
     "target",
     "target_models",

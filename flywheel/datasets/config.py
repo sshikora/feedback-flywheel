@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class DatasetConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    target_languages: list[str] = Field(default_factory=list, description="Empty keeps all.")
     min_quality: float = Field(default=0.0, ge=0, le=1)
     sft_contested: bool = True
     dpo_contested: bool = False

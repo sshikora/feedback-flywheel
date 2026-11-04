@@ -1,6 +1,7 @@
 # Defaults for `flywheel build sft` and `flywheel build dpo`. Copy and pass with
 # --config to change them. Settings are recorded in each snapshot's manifest.
 
+target_languages = []    # keep only these target languages, such as ["ceb"]. Empty keeps all.
 min_quality = 0.0        # curated quality score an event needs, from 0 to 1
 sft_contested = true     # keep events where voters chose different answers, for SFT
 dpo_contested = false    # and for DPO, where the rejected answer was someone's choice

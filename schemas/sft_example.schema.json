@@ -1,0 +1,79 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "origin": {
+      "enum": [
+        "human",
+        "synthetic"
+      ],
+      "title": "Origin",
+      "type": "string"
+    },
+    "src_lang": {
+      "title": "Src Lang",
+      "type": "string"
+    },
+    "tgt_lang": {
+      "title": "Tgt Lang",
+      "type": "string"
+    },
+    "tone": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tone"
+    },
+    "source": {
+      "minLength": 1,
+      "title": "Source",
+      "type": "string"
+    },
+    "target": {
+      "minLength": 1,
+      "title": "Target",
+      "type": "string"
+    },
+    "target_models": {
+      "description": "Models that wrote the target.",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Target Models",
+      "type": "array"
+    },
+    "support": {
+      "description": "Independent votes for the target.",
+      "minimum": 1,
+      "title": "Support",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "event_id",
+    "origin",
+    "src_lang",
+    "tgt_lang",
+    "source",
+    "target",
+    "target_models",
+    "support"
+  ],
+  "title": "SftExample",
+  "type": "object"
+}

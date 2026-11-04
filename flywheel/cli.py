@@ -1,5 +1,6 @@
 """The `flywheel` command line. Each stage reads and writes files under --data-dir."""
 
+import hashlib
 import json
 import os
 from datetime import UTC, datetime
@@ -11,12 +12,14 @@ import typer
 
 from flywheel.curate.config import CurationConfig
 from flywheel.curate.pipeline import curate as run_curation
+from flywheel.datasets import builders, snapshot
+from flywheel.datasets.config import DatasetConfig
 from flywheel.evals import judge as judging
 from flywheel.evals import rating, report
 from flywheel.evals import translate as translating
 from flywheel.evals.config import EvalConfig
 from flywheel.ingest import comparisons, flores, jsonl
-from flywheel.schema import EvalSegment, FeedbackEvent, HumanRating
+from flywheel.schema import CuratedEvent, EvalSegment, FeedbackEvent, HumanRating
 from flywheel.schema.export import stale_schemas, write_schemas
 from flywheel.scrub import scrub_events
 from flywheel.storage import append_jsonl, read_jsonl, write_json, write_jsonl
@@ -30,6 +33,8 @@ eval_app = typer.Typer(no_args_is_help=True, help="Run models and the judge over
 app.add_typer(eval_app, name="eval")
 rate_app = typer.Typer(no_args_is_help=True, help="Blind human rating by spreadsheet.")
 app.add_typer(rate_app, name="rate")
+build_app = typer.Typer(no_args_is_help=True, help="Build training datasets from curated events.")
+app.add_typer(build_app, name="build")
 
 DataDir = Annotated[Path, typer.Option(help="Where pipeline data lives. Never committed.")]
 Config = Annotated[Path, typer.Option(help="An eval TOML file.")]
@@ -113,6 +118,47 @@ def curate(
     write_json(data_dir / "curated" / "report.json", result.report)
     typer.echo(f"train {len(result.train)}, held out {len(result.heldout)}")
     for reason, count in result.report["dropped"].items():
+        typer.echo(f"dropped {count} ({reason})")
+
+
+DatasetConfigOption = Annotated[Path | None, typer.Option("--config", help="A dataset TOML file.")]
+
+
+@build_app.command("sft")
+def build_sft(data_dir: DataDir = Path("data"), config: DatasetConfigOption = None) -> None:
+    """Build an SFT snapshot: each input with the answer voters chose."""
+    _build("sft", data_dir, config)
+
+
+@build_app.command("dpo")
+def build_dpo(data_dir: DataDir = Path("data"), config: DatasetConfigOption = None) -> None:
+    """Build a DPO snapshot: the chosen answer against each answer voters passed over."""
+    _build("dpo", data_dir, config)
+
+
+def _build(kind: snapshot.Kind, data_dir: Path, config: Path | None) -> None:
+    settings = DatasetConfig.from_toml(config) if config else DatasetConfig()
+    path = data_dir / "curated" / "train.jsonl"
+    if not path.exists():
+        raise typer.BadParameter(f"{path} is missing. Run `flywheel curate` first.")
+    items = read_jsonl(path, CuratedEvent)
+    build = (builders.build_sft if kind == "sft" else builders.build_dpo)(items, settings)
+    report_path = data_dir / "curated" / "report.json"
+    source = {
+        "path": "curated/train.jsonl",
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "curated_events": len(items),
+        "curation_config": json.loads(report_path.read_text())["config"]
+        if report_path.exists()
+        else None,
+    }
+    meta = snapshot.manifest(kind, build, settings, source)
+    result = snapshot.write_snapshot(data_dir / "datasets", kind, build.examples, meta)
+    state = "built" if result.created else "already built, unchanged:"
+    typer.echo(
+        f"{state} {result.directory} ({len(build.examples)} examples, {len(build.used)} events)"
+    )
+    for reason, count in sorted(build.dropped.items()):
         typer.echo(f"dropped {count} ({reason})")
 
 

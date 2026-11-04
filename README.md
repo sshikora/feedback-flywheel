@@ -10,15 +10,28 @@ Translation is the first worked example, using English to Cebuano. [translate.mo
 
 ## Status
 
-Early. There are no model results yet, and this section will lead with them once there are.
+The baseline is measured, and nothing is trained yet. Six models translated all 1,012 English sentences of the FLORES-200 devtest set into Cebuano:
+
+| Model | chrF++, 95% CI | Failed |
+|---|---|---|
+| Gemini 3.8 Flash | 61.70 [61.08, 62.33] | 1 |
+| DeepSeek V4.1 Flash | 60.24 [59.59, 60.87] | 0 |
+| Gemma 4 31B | 59.72 [59.07, 60.36] | 0 |
+| Gemma 4 26B A4B | 59.54 [58.90, 60.20] | 0 |
+| Qwen3.5 9B | 45.74 [45.18, 46.36] | 0 |
+| Llama 3.1 8B | 37.15 [36.49, 37.84] | 18 |
+
+The first four are the translation app's models. The smaller ones are candidates to fine-tune, and the goal is to close the gap. A blind judge comparing each candidate with the app's models finds the same gaps. Qwen3.5 9B and Llama 3.1 8B lose nearly every comparison, while Gemma 4 26B A4B is close to even with all but Gemini. A native speaker is scoring a blind sample now, and those scores settle the base model.
 
 | Stage | State |
 |---|---|
 | Event schema, JSON Schema export | Done |
 | Ingest: JSONL, comparisons export, FLORES-200 | Done |
 | Curation: PII and secret scrubbing, dedupe, quality scoring, leakage protection | Done |
-| Evaluation harness: chrF++, blind judge, human ratings, HTML report | Built, and tested on 3 sentences with real models |
-| Baseline results | Next |
+| Evaluation harness: chrF++, blind judge, human ratings, HTML report | Done |
+| Baseline: machine scores | Done |
+| Baseline: first native-speaker round | In progress |
+| Base model checks: export, license, GPU fit | Done, see [0011](docs/decisions/0011-base-model-checks.md) |
 | Training, registry, promotion gates | Planned |
 | Live integration | Planned |
 
@@ -31,11 +44,11 @@ Requires [uv](https://docs.astral.sh/uv/).
 ```sh
 uv sync
 uv run flywheel ingest flores --src en --tgt ceb --split devtest
-uv run flywheel ingest comparisons tests/fixtures/comparisons_scan.json
+uv run flywheel ingest comparisons tests/fixtures/comparisons_scan.json --training-from 2026-10-27
 uv run flywheel curate
 ```
 
-Output lands in `data/`, which is never committed. `data/curated/report.json` has the counts behind each decision: what was dropped and why, the human versus synthetic share, and vote statistics by model.
+Votes may train only if they were cast after `--training-from`, the date the app's privacy page began naming the training provider. Without it, none may. Output lands in `data/`, which is never committed. `data/curated/report.json` has the counts behind each decision: what was dropped and why, the human versus synthetic share, and vote statistics by model.
 
 ### Evaluate models
 

@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import tarfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -39,8 +40,22 @@ def test_votes_are_recorded_as_not_blind():
 
 def test_only_shared_comparisons_may_be_published():
     private, shared = load_comparisons(FIXTURE).events
-    assert (private.consent.training, private.consent.publish) == (True, False)
-    assert (shared.consent.training, shared.consent.publish) == (True, True)
+    assert (private.consent.publish, shared.consent.publish) == (False, True)
+
+
+def test_no_vote_may_train_until_the_privacy_page_names_the_provider():
+    assert not any(e.consent.training for e in load_comparisons(FIXTURE).events)
+
+
+def test_only_votes_cast_after_the_privacy_change_may_train():
+    changed = datetime(2026, 10, 27, 11, 0, tzinfo=UTC)
+    before, after = load_comparisons(FIXTURE, training_from=changed).events
+    assert (before.consent.training, after.consent.training) == (False, True)
+
+
+def test_a_change_date_without_a_time_zone_is_refused():
+    with pytest.raises(ValueError, match="time zone"):
+        load_comparisons(FIXTURE, training_from=datetime(2026, 10, 27))
 
 
 def test_auto_source_language_means_unspecified():

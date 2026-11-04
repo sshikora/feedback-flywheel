@@ -1,0 +1,61 @@
+{
+  "additionalProperties": false,
+  "description": "A promotion, a hold or a retirement. A hold keeps the status and records why.",
+  "properties": {
+    "model_id": {
+      "title": "Model Id",
+      "type": "string"
+    },
+    "at": {
+      "format": "date-time",
+      "title": "At",
+      "type": "string"
+    },
+    "from_status": {
+      "anyOf": [
+        {
+          "enum": [
+            "candidate",
+            "challenger",
+            "champion",
+            "retired"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "From Status"
+    },
+    "to_status": {
+      "enum": [
+        "candidate",
+        "challenger",
+        "champion",
+        "retired"
+      ],
+      "title": "To Status",
+      "type": "string"
+    },
+    "reason": {
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    },
+    "evidence": {
+      "additionalProperties": true,
+      "title": "Evidence",
+      "type": "object"
+    }
+  },
+  "required": [
+    "model_id",
+    "at",
+    "from_status",
+    "to_status",
+    "reason"
+  ],
+  "title": "StatusChange",
+  "type": "object"
+}

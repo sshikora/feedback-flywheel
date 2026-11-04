@@ -1,0 +1,121 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "base_model": {
+      "title": "Base Model",
+      "type": "string"
+    },
+    "start_from": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Start From"
+    },
+    "method": {
+      "enum": [
+        "sft",
+        "dpo"
+      ],
+      "title": "Method",
+      "type": "string"
+    },
+    "dataset_hash": {
+      "title": "Dataset Hash",
+      "type": "string"
+    },
+    "run_config": {
+      "description": "Path of the run config, as checked in.",
+      "title": "Run Config",
+      "type": "string"
+    },
+    "run_config_hash": {
+      "title": "Run Config Hash",
+      "type": "string"
+    },
+    "provider": {
+      "title": "Provider",
+      "type": "string"
+    },
+    "provider_job_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider Job Id"
+    },
+    "weights": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Where the merged weights are kept.",
+      "title": "Weights"
+    },
+    "eval_report": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Eval Report"
+    },
+    "cost_usd": {
+      "minimum": 0,
+      "title": "Cost Usd",
+      "type": "number"
+    },
+    "status": {
+      "enum": [
+        "candidate",
+        "challenger",
+        "champion",
+        "retired"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "base_model",
+    "method",
+    "dataset_hash",
+    "run_config",
+    "run_config_hash",
+    "provider",
+    "cost_usd",
+    "status",
+    "created_at"
+  ],
+  "title": "ModelRecord",
+  "type": "object"
+}

@@ -33,7 +33,8 @@ The first three make up the translation app's free compare set. The other three 
 | Baseline: first native-speaker round | In progress |
 | Base model checks: export, license, GPU fit | Done, see [0011](docs/decisions/0011-base-model-checks.md) |
 | Datasets: SFT and DPO builders, hashed snapshots, data cards | Done |
-| Training, registry, promotion gates | Planned |
+| Registry: run configs, status history, model cards | Done |
+| Training, promotion gates | Planned |
 | Live integration | Planned |
 
 The full design is in [PLAN.md](PLAN.md), and the reasoning behind major choices is in [docs/decisions](docs/decisions).

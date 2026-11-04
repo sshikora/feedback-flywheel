@@ -105,3 +105,43 @@ def test_schema_check_passes_after_export_and_fails_before(tmp_path):
     assert runner.invoke(app, ["schema", "--out", str(out), "--check"]).exit_code == 1
     run("schema", "--out", out)
     assert "current" in run("schema", "--out", out, "--check")
+
+
+def test_build_register_and_card(tmp_path):
+    data = tmp_path / "data"
+    run("ingest", "comparisons", FIXTURE, "--data-dir", data, "--training-from", "2026-10-27")
+    config = tmp_path / "curation.toml"
+    config.write_text("heldout_pct = 0\n")
+    run("curate", "--data-dir", data, "--config", config)
+    run("build", "sft", "--data-dir", data)
+    (snapshot,) = (data / "datasets").iterdir()
+    digest = json.loads((snapshot / "manifest.json").read_text())["hash"]
+
+    example = Path(__file__).parent.parent / "configs" / "run.example.toml"
+    run_config = tmp_path / "v1.toml"
+    run_config.write_text(
+        example.read_text().replace("0" * 64, digest).replace("example-qwen3.5-9b-sft", "v1")
+    )
+    assert "registered v1 as a candidate" in run(
+        "registry", "add", run_config, "--provider", "together", "--cost", "3.5", "--data-dir", data
+    )
+    assert "v1  candidate  sft  Qwen/Qwen3.5-9B" in run("registry", "list", "--data-dir", data)
+    run("registry", "card", "v1", "--data-dir", data)
+    card = (data / "registry" / "cards" / "v1.md").read_text()
+    assert "**Size:** 2 records from 2 curated events" in card
+    assert "**Cost:** $3.50" in card
+
+    run_config.write_text(run_config.read_text().replace("epochs = 3", "epochs = 4"))
+    changed = runner.invoke(app, ["registry", "card", "v1", "--data-dir", str(data)])
+    assert changed.exit_code != 0
+    assert "has changed since v1 was trained" in changed.output
+
+
+def test_a_run_config_must_name_a_built_snapshot(tmp_path):
+    example = Path(__file__).parent.parent / "configs" / "run.example.toml"
+    result = runner.invoke(
+        app,
+        ["registry", "add", str(example), "--provider", "together", "--data-dir", str(tmp_path)],
+    )
+    assert result.exit_code != 0
+    assert "has hash" in result.output

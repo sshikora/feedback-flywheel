@@ -5,7 +5,7 @@ import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import anthropic
 import typer
@@ -19,10 +19,13 @@ from flywheel.evals import rating, report
 from flywheel.evals import translate as translating
 from flywheel.evals.config import EvalConfig
 from flywheel.ingest import comparisons, flores, jsonl
-from flywheel.schema import CuratedEvent, EvalSegment, FeedbackEvent, HumanRating
+from flywheel.registry.card import render_card as render_model_card
+from flywheel.registry.store import Registry
+from flywheel.schema import CuratedEvent, EvalSegment, FeedbackEvent, HumanRating, ModelRecord
 from flywheel.schema.export import stale_schemas, write_schemas
 from flywheel.scrub import scrub_events
 from flywheel.storage import append_jsonl, read_jsonl, write_json, write_jsonl
+from flywheel.train.config import RunConfig, config_hash
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
 ingest_app = typer.Typer(
@@ -35,6 +38,8 @@ rate_app = typer.Typer(no_args_is_help=True, help="Blind human rating by spreads
 app.add_typer(rate_app, name="rate")
 build_app = typer.Typer(no_args_is_help=True, help="Build training datasets from curated events.")
 app.add_typer(build_app, name="build")
+registry_app = typer.Typer(no_args_is_help=True, help="Trained models, their status and cards.")
+app.add_typer(registry_app, name="registry")
 
 DataDir = Annotated[Path, typer.Option(help="Where pipeline data lives. Never committed.")]
 Config = Annotated[Path, typer.Option(help="An eval TOML file.")]
@@ -160,6 +165,97 @@ def _build(kind: snapshot.Kind, data_dir: Path, config: Path | None) -> None:
     )
     for reason, count in sorted(build.dropped.items()):
         typer.echo(f"dropped {count} ({reason})")
+
+
+def _registry(data_dir: Path) -> Registry:
+    return Registry(data_dir / "registry" / "registry.sqlite")
+
+
+def _snapshot_manifest(data_dir: Path, digest: str) -> dict[str, Any] | None:
+    for path in sorted((data_dir / "datasets").glob(f"*-{digest[:12]}/manifest.json")):
+        meta: dict[str, Any] = json.loads(path.read_text())
+        if meta["hash"] == digest:
+            return meta
+    return None
+
+
+@registry_app.command("add")
+def registry_add(
+    run_config: Path,
+    provider: Annotated[str, typer.Option(help="Where it was trained, such as together.")],
+    job_id: Annotated[str | None, typer.Option(help="The provider's job id.")] = None,
+    weights: Annotated[str | None, typer.Option(help="Where the merged weights are kept.")] = None,
+    cost: Annotated[float, typer.Option(help="Training cost in US dollars.")] = 0.0,
+    data_dir: DataDir = Path("data"),
+) -> None:
+    """Register a trained model as a candidate, named after its run config."""
+    config = RunConfig.from_toml(run_config)
+    if _snapshot_manifest(data_dir, config.dataset) is None:
+        raise typer.BadParameter(
+            f"no snapshot in {data_dir / 'datasets'} has hash {config.dataset}"
+        )
+    registry = _registry(data_dir)
+    try:
+        if config.start_from is not None:
+            registry.get(config.start_from)
+        record = registry.register(
+            ModelRecord(
+                id=config.name,
+                base_model=config.base_model,
+                start_from=config.start_from,
+                method=config.method,
+                dataset_hash=config.dataset,
+                run_config=run_config.as_posix(),
+                run_config_hash=config_hash(run_config),
+                provider=provider,
+                provider_job_id=job_id,
+                weights=weights,
+                cost_usd=cost,
+                status="candidate",
+                created_at=datetime.now(UTC),
+            )
+        )
+    except KeyError as missing:
+        raise typer.BadParameter(f"start_from {missing} is not registered") from None
+    except ValueError as err:
+        raise typer.BadParameter(str(err)) from None
+    finally:
+        registry.close()
+    typer.echo(f"registered {record.id} as a candidate")
+
+
+@registry_app.command("list")
+def registry_list(data_dir: DataDir = Path("data")) -> None:
+    """Every registered model and its status."""
+    registry = _registry(data_dir)
+    try:
+        for record in registry.models():
+            typer.echo(f"{record.id}  {record.status}  {record.method}  {record.base_model}")
+    finally:
+        registry.close()
+
+
+@registry_app.command("card")
+def registry_card(model_id: str, data_dir: DataDir = Path("data")) -> None:
+    """Write a model's card from the registry, its run config and its dataset."""
+    registry = _registry(data_dir)
+    try:
+        record = registry.get(model_id)
+        history = registry.history(model_id)
+    except KeyError:
+        raise typer.BadParameter(f"{model_id} is not registered") from None
+    finally:
+        registry.close()
+    config = RunConfig.from_toml(Path(record.run_config))
+    if config_hash(Path(record.run_config)) != record.run_config_hash:
+        raise typer.BadParameter(f"{record.run_config} has changed since {model_id} was trained")
+    card = render_model_card(
+        record, config, history, _snapshot_manifest(data_dir, record.dataset_hash)
+    )
+    path = data_dir / "registry" / "cards" / f"{model_id}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(card, encoding="utf-8")
+    typer.echo(f"wrote {path}")
 
 
 def _load_segments(config: EvalConfig, data_dir: Path) -> list[EvalSegment]:

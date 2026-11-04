@@ -15,7 +15,9 @@ from flywheel.schema import (
     EvalSegment,
     FeedbackEvent,
     HumanRating,
+    ModelRecord,
     SftExample,
+    StatusChange,
 )
 
 EXPORTED: dict[str, type[BaseModel]] = {
@@ -25,6 +27,8 @@ EXPORTED: dict[str, type[BaseModel]] = {
     "human_rating": HumanRating,
     "sft_example": SftExample,
     "dpo_pair": DpoPair,
+    "model_record": ModelRecord,
+    "status_change": StatusChange,
 }
 
 

@@ -1,0 +1,23 @@
+# An example training run. Copy it to configs/runs/<name>.toml for a real run.
+# Every setting is required, and the gate thresholds are set here before
+# training starts. The registry stores this file's hash, so an edit after the
+# run shows up on the model card.
+
+name = "example-qwen3.5-9b-sft"
+description = "Example only. English to Cebuano translation, LoRA SFT on voted answers."
+base_model = "Qwen/Qwen3.5-9B"
+method = "sft"
+dataset = "0000000000000000000000000000000000000000000000000000000000000000"  # from flywheel build
+seed = 1
+
+[hyperparameters]
+epochs = 3
+learning_rate = 0.0001
+batch_size = 8
+lora_rank = 64
+lora_alpha = 128
+
+[gate]
+min_judge_win_rate = 0.55
+guard_set = "flores200-dev-en-ceb"
+human_check = true

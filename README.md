@@ -21,7 +21,7 @@ The baseline is measured, and nothing is trained yet. Six models translated all 
 | Qwen3.5 9B | 45.74 [45.18, 46.36] | 0 |
 | Llama 3.1 8B | 37.15 [36.49, 37.84] | 18 |
 
-The first four are the translation app's models. The smaller ones are candidates to fine-tune, and the goal is to close the gap. A blind judge comparing each candidate with the app's models finds the same gaps. Qwen3.5 9B and Llama 3.1 8B lose nearly every comparison, while Gemma 4 26B A4B is close to even with all but Gemini. A native speaker is scoring a blind sample now, and those scores settle the base model.
+The first three make up the translation app's free compare set. The other three are candidates to fine-tune, and the goal is to close the gap. A blind judge comparing each candidate with the app's models finds the same gaps. Qwen3.5 9B and Llama 3.1 8B lose nearly every comparison, while Gemma 4 26B A4B is close to even with all but Gemini. A native speaker is scoring a blind sample now, and those scores settle the base model.
 
 | Stage | State |
 |---|---|

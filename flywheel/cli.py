@@ -17,10 +17,10 @@ from flywheel.curate.config import CurationConfig
 from flywheel.curate.pipeline import curate as run_curation
 from flywheel.datasets import builders, snapshot
 from flywheel.datasets.config import DatasetConfig
+from flywheel.evals import hosted, rating, report
 from flywheel.evals import judge as judging
-from flywheel.evals import rating, report
 from flywheel.evals import translate as translating
-from flywheel.evals.config import EvalConfig
+from flywheel.evals.config import EvalConfig, ModelSpec
 from flywheel.ingest import comparisons, flores, jsonl, opus
 from flywheel.registry.card import render_card as render_model_card
 from flywheel.registry.store import Registry
@@ -453,22 +453,59 @@ def eval_translate(
         f"{len(work)} requests across {len(models)} models, "
         f"${spent:.2f} spent so far, limit ${settings.max_cost_usd:.2f}"
     )
+    self_hosted = {m.id: m for m in settings.models if m.host == "modal"}
+    if any(model in self_hosted for model, _ in work):
+        typer.echo(f"each Modal model costs at most ${hosted.worst_case_usd():.2f} of GPU time")
     if not yes:
         typer.echo("Nothing was sent. Pass --yes to run this.")
         return
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    if not api_key:
-        typer.echo("OPENROUTER_API_KEY is not set.", err=True)
-        raise typer.Exit(code=1)
-    efforts = {m.id: m.reasoning_effort for m in settings.models if m.reasoning_effort}
-    completer = translating.OpenRouter(api_key, efforts)
-    try:
-        total = translating.translate(work, completer, path, settings.max_cost_usd, spent)
-    except (translating.BudgetExceeded, translating.RequestRejected) as err:
-        typer.echo(f"stopped: {err}. Finished work is saved.", err=True)
-        raise typer.Exit(code=1) from err
+    routed = [(model, segment) for model, segment in work if model not in self_hosted]
+    if routed:
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            typer.echo("OPENROUTER_API_KEY is not set.", err=True)
+            raise typer.Exit(code=1)
+        efforts = {m.id: m.reasoning_effort for m in settings.models if m.reasoning_effort}
+        completer = translating.OpenRouter(api_key, efforts)
+        try:
+            spent = translating.translate(routed, completer, path, settings.max_cost_usd, spent)
+        except (translating.BudgetExceeded, translating.RequestRejected) as err:
+            typer.echo(f"stopped: {err}. Finished work is saved.", err=True)
+            raise typer.Exit(code=1) from err
+    for spec in self_hosted.values():
+        todo = [segment for model, segment in work if model == spec.id]
+        if todo:
+            spent += _translate_on_modal(spec, todo, path, settings.max_cost_usd - spent, data_dir)
     failed = sum(record.output is None for record in translating.read_translations(path).values())
-    typer.echo(f"done, ${total:.2f} spent in total, {failed} failed")
+    typer.echo(f"done, ${spent:.2f} spent in total, {failed} failed")
+
+
+def _translate_on_modal(
+    spec: ModelSpec, segments: list[EvalSegment], path: Path, left_usd: float, data_dir: Path
+) -> float:
+    """Run one self-hosted model and return what it cost."""
+    worst = hosted.worst_case_usd()
+    if worst > left_usd:
+        typer.echo(
+            f"stopped: {spec.id} could cost up to ${worst:.2f}, and ${left_usd:.2f} is left.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    url = None
+    kind, _, name = (spec.weights or "").partition(":")
+    if kind == "run":
+        state_path = training.run_dir(data_dir, name) / "state.json"
+        if not state_path.exists():
+            raise typer.BadParameter(f"no training run named {name}")
+        state = training.TrainingState.load(state_path)
+        if state.status != "completed" or state.job_id is None:
+            raise typer.BadParameter(f"{name} is {state.status}, not completed")
+        with _training_errors():
+            url = _together().download_url(state.job_id)
+    typer.echo(f"{spec.id}: {len(segments)} sentences on Modal")
+    records = hosted.translate_on_modal(spec, segments, url)
+    append_jsonl(path, records)
+    return sum(record.cost_usd for record in records)
 
 
 @eval_app.command("judge")

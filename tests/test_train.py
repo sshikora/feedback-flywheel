@@ -194,6 +194,9 @@ class FakeTogether:
             )
         if path == "/v1/finetune/download":
             assert request.url.params["checkpoint"] == "merged"
+            return httpx.Response(302, headers={"location": "https://storage.example/weights"})
+        if request.url.host == "storage.example":
+            assert "authorization" not in request.headers
             return httpx.Response(200, content=b"weights")
         return httpx.Response(404, json={"error": {"message": f"no route {path}"}})
 
@@ -231,6 +234,17 @@ def test_a_download_lands_whole_or_not_at_all(tmp_path):
     assert FakeTogether().client().download("ft-1", destination) == len(b"weights")
     assert destination.read_bytes() == b"weights"
     assert not (destination.parent / "merged.tar.zst.part").exists()
+
+
+def test_an_empty_download_is_refused(tmp_path):
+    def handle(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"")
+
+    destination = tmp_path / "merged.tar.zst"
+    with pytest.raises(TogetherError, match="download was empty"):
+        Together("key", httpx.MockTransport(handle)).download("ft-1", destination)
+    assert not destination.exists()
+    assert not (tmp_path / "merged.tar.zst.part").exists()
 
 
 # --- a run ---
@@ -354,3 +368,15 @@ def test_start_status_and_download_register_a_candidate(tmp_path, monkeypatch):
     state = json.loads((data / "training" / "v1" / "state.json").read_text())
     assert state["weights"].endswith("merged.tar.zst")
     assert state["estimate_usd"] == 4.0
+
+
+def test_the_download_link_is_the_redirect_target():
+    assert FakeTogether().client().download_url("ft-1") == "https://storage.example/weights"
+
+
+def test_a_download_link_needs_a_redirect():
+    def handle(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": {"message": "no such job"}})
+
+    with pytest.raises(TogetherError, match="no such job"):
+        Together("key", httpx.MockTransport(handle)).download_url("ft-9")

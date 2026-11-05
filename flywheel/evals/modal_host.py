@@ -9,7 +9,6 @@ Both models in a comparison run here with the same settings, so a difference in
 scores comes from the weights and not from the host.
 """
 
-import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -69,8 +68,13 @@ def fetch(key: str, repo: str | None = None, url: str | None = None) -> bool:
 
         snapshot_download(repo, local_dir=target)
     elif url is not None:
-        command = f"curl -fsSL {shlex.quote(url)} | zstd -d | tar -x -C {shlex.quote(str(target))}"
-        subprocess.run(["bash", "-o", "pipefail", "-c", command], check=True)
+        # To a file first, so a stalled connection resumes instead of starting over.
+        archive = target.with_suffix(".tar.zst")
+        resume = ["--retry", "5", "--retry-all-errors", "-C", "-"]
+        stall = ["--speed-limit", "1000000", "--speed-time", "60"]
+        subprocess.run(["curl", "-fsSL", *resume, *stall, "-o", str(archive), url], check=True)
+        subprocess.run(["tar", "--zstd", "-xf", str(archive), "-C", str(target)], check=True)
+        archive.unlink()
     else:
         raise ValueError("fetch needs a repo or a url")
     done.touch()

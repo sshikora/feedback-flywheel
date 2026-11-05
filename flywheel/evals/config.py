@@ -12,11 +12,34 @@ class Settings(BaseModel):
 
 
 class ModelSpec(Settings):
-    id: str = Field(pattern=r"^[^/]+/.+$", description="An OpenRouter model id.")
+    id: str = Field(
+        pattern=r"^[^/]+/.+$",
+        description="An OpenRouter model id, or a name for a self-hosted model.",
+    )
     role: Literal["compare", "base"]
     reasoning_effort: Literal["low"] | None = Field(
         default=None, description="For models that cannot run with reasoning off."
     )
+    host: Literal["openrouter", "modal"] = "openrouter"
+    weights: str | None = Field(
+        default=None,
+        pattern=r"^(hf|run):.+$",
+        description="For Modal: hf:<repo> for a base model, run:<name> for a trained one.",
+    )
+
+    @model_validator(mode="after")
+    def _weights_only_when_self_hosted(self) -> Self:
+        if (self.host == "modal") != (self.weights is not None):
+            raise ValueError(f"{self.id}: a Modal model needs weights, and only it takes them")
+        if self.host == "modal" and self.reasoning_effort is not None:
+            raise ValueError(f"{self.id}: reasoning_effort applies to OpenRouter models only")
+        return self
+
+    @property
+    def weights_key(self) -> str:
+        """The model's folder in the Modal volume."""
+        kind, _, name = (self.weights or "").partition(":")
+        return name if kind == "run" else f"hf--{name.replace('/', '--')}"
 
 
 class JudgeSettings(Settings):

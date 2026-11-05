@@ -85,18 +85,36 @@ class Together:
         body: dict[str, Any] = self._request("GET", f"/v1/fine-tunes/{job_id}").json()
         return body
 
+    def download_url(self, job_id: str, checkpoint: str = "merged") -> str:
+        """The short-lived storage link Together redirects a download to."""
+        params = {"ft_id": job_id, "checkpoint": checkpoint}
+        response = self._client.get("/v1/finetune/download", params=params)
+        location = response.headers.get("location")
+        if not response.is_redirect or not location:
+            raise TogetherError(f"download link refused: {_error_message(response)}")
+        return str(location)
+
     def download(self, job_id: str, destination: Path, checkpoint: str = "merged") -> int:
-        """Stream the trained weights to a file and return its size in bytes."""
+        """Stream the trained weights to a file and return its size in bytes.
+
+        Together answers with a redirect to its storage host. httpx drops the API key
+        when a redirect leaves the origin, so the key never reaches that host.
+        """
         destination.parent.mkdir(parents=True, exist_ok=True)
         partial = destination.with_name(destination.name + ".part")
         params = {"ft_id": job_id, "checkpoint": checkpoint}
-        with self._client.stream("GET", "/v1/finetune/download", params=params) as response:
+        with self._client.stream(
+            "GET", "/v1/finetune/download", params=params, follow_redirects=True
+        ) as response:
             if response.is_error:
                 response.read()
                 raise TogetherError(f"download refused: {_error_message(response)}")
             with partial.open("wb") as file:
                 for chunk in response.iter_bytes():
                     file.write(chunk)
+        if partial.stat().st_size == 0:
+            partial.unlink()
+            raise TogetherError(f"download was empty (HTTP {response.status_code})")
         partial.replace(destination)
         return destination.stat().st_size
 

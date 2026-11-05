@@ -1,5 +1,6 @@
 """The evaluation harness, with fake model clients. No test here spends money."""
 
+import contextlib
 import csv
 import json
 from pathlib import Path
@@ -11,9 +12,10 @@ import pytest
 from sacrebleu.metrics.chrf import CHRF
 from typer.testing import CliRunner
 
+from flywheel import cli as cli_module
 from flywheel.cli import app
-from flywheel.evals import judge, metrics, rating, report, translate
-from flywheel.evals.config import EvalConfig
+from flywheel.evals import hosted, judge, metrics, modal_host, rating, report, translate
+from flywheel.evals.config import EvalConfig, ModelSpec
 from flywheel.schema import HumanRating, JudgeVerdict, TranslationRecord
 from flywheel.storage import read_jsonl, write_jsonl
 from tests.factories import make_segment
@@ -811,3 +813,130 @@ class TestCommands:
         cli("report", *self.common(workspace))
         built = json.loads((workspace.data / "runs" / "test-run" / "report.json").read_text())
         assert built["human"]["raters"] == ["rater-1"]
+
+
+# --- self-hosted models on Modal ---
+
+
+class TestSelfHosted:
+    def test_a_modal_model_needs_weights_and_only_it_takes_them(self):
+        with pytest.raises(ValueError, match="needs weights"):
+            ModelSpec(id="flywheel/m", role="base", host="modal")
+        with pytest.raises(ValueError, match="needs weights"):
+            ModelSpec(id="qwen/m", role="base", weights="hf:Qwen/Qwen3.5-9B")
+        with pytest.raises(ValueError, match="OpenRouter models only"):
+            ModelSpec(
+                id="flywheel/m", role="base", host="modal", weights="run:x", reasoning_effort="low"
+            )
+        with pytest.raises(ValueError):
+            ModelSpec(id="flywheel/m", role="base", host="modal", weights="s3:bucket")
+
+    def test_weights_have_one_folder_each(self):
+        base = ModelSpec(id="modal/q", role="compare", host="modal", weights="hf:Qwen/Qwen3.5-9B")
+        trained = ModelSpec(id="flywheel/q", role="base", host="modal", weights="run:q-sft-1")
+        assert base.weights_key == "hf--Qwen--Qwen3.5-9B"
+        assert trained.weights_key == "q-sft-1"
+
+    def test_records_split_the_gpu_time_and_keep_empty_answers_as_failures(self, monkeypatch):
+        calls = []
+
+        class Remote:
+            def __init__(self, name, result=None):
+                self.name, self.result = name, result
+
+            def remote(self, *args, **kwargs):
+                calls.append((self.name, args, kwargs))
+                return self.result
+
+        answers = [
+            modal_host.Generation("Maayong buntag.", "stop"),
+            modal_host.Generation("", "stop"),
+        ]
+        monkeypatch.setattr(modal_host.app, "run", contextlib.nullcontext)
+        monkeypatch.setattr(modal_host, "fetch", Remote("fetch"))
+        monkeypatch.setattr(modal_host, "generate", Remote("generate", (answers, 100.0)))
+        spec = ModelSpec(id="flywheel/q", role="base", host="modal", weights="run:q-sft-1")
+        records = hosted.translate_on_modal(spec, make_segments(2), "https://signed.example/w")
+
+        assert calls[0] == ("fetch", ("q-sft-1",), {"url": "https://signed.example/w"})
+        assert calls[1][1][0] == "q-sft-1"
+        assert len(calls[1][1][1]) == 2
+        assert records[0].output == "Maayong buntag."
+        assert records[1].error == "empty answer"
+        assert records[0].cost_usd == pytest.approx(50 * modal_host.GPU_USD_PER_SECOND)
+
+    @pytest.fixture
+    def hosted_workspace(self, workspace, monkeypatch):
+        workspace.config.write_text(
+            'name = "test-run"\neval_set = "test-set"\nresamples = 100\nmax_cost_usd = 1.0\n'
+            '[[models]]\nid = "modal/base"\nrole = "compare"\nhost = "modal"\n'
+            'weights = "hf:Qwen/Qwen3.5-9B"\n'
+            '[[models]]\nid = "flywheel/trained"\nrole = "base"\nhost = "modal"\n'
+            'weights = "run:trained-1"\n'
+            "[judge]\nsentences = 5\n",
+            encoding="utf-8",
+        )
+        state = workspace.data / "training" / "trained-1" / "state.json"
+        state.parent.mkdir(parents=True)
+        state.write_text(
+            json.dumps(
+                {
+                    "name": "trained-1",
+                    "run_config": "configs/runs/trained-1.toml",
+                    "run_config_hash": "h",
+                    "dataset": "d",
+                    "training_file_sha256": "s",
+                    "lines": 1,
+                    "skipped": {},
+                    "job_id": "ft-1",
+                    "status": "completed",
+                }
+            )
+        )
+        calls = []
+
+        def translate_on_modal(spec, segments, url):
+            calls.append((spec.id, len(segments), url))
+            return [
+                TranslationRecord(
+                    segment_id=s.id, model_id=spec.id, output=f"{spec.id} {s.id}", cost_usd=0.001
+                )
+                for s in segments
+            ]
+
+        class FakeTogether:
+            def download_url(self, job_id):
+                return f"https://signed.example/{job_id}"
+
+        monkeypatch.setattr(hosted, "translate_on_modal", translate_on_modal)
+        monkeypatch.setattr(hosted, "worst_case_usd", lambda: 0.4)
+        monkeypatch.setattr(cli_module, "_together", FakeTogether)
+        monkeypatch.delenv("OPENROUTER_API_KEY")
+        workspace.calls = calls
+        return workspace
+
+    def test_translate_runs_each_model_once_without_an_openrouter_key(self, hosted_workspace):
+        ws = hosted_workspace
+        common = ("--config", ws.config, "--data-dir", ws.data)
+        assert "at most $0.40" in cli("eval", "translate", *common)
+        assert ws.calls == []
+        output = cli("eval", "translate", "--yes", *common)
+        assert ws.calls == [
+            ("modal/base", 30, None),
+            ("flywheel/trained", 30, "https://signed.example/ft-1"),
+        ]
+        assert "$0.06 spent in total, 0 failed" in output
+        cli("eval", "translate", "--yes", *common)
+        assert len(ws.calls) == 2
+        assert ws.completer.calls == []
+
+    def test_translate_refuses_a_model_the_budget_cannot_cover(self, hosted_workspace, monkeypatch):
+        monkeypatch.setattr(hosted, "worst_case_usd", lambda: 5.0)
+        ws = hosted_workspace
+        result = runner.invoke(
+            app,
+            ["eval", "translate", "--yes", "--config", str(ws.config), "--data-dir", str(ws.data)],
+        )
+        assert result.exit_code == 1
+        assert "could cost up to $5.00" in result.output
+        assert ws.calls == []

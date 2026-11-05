@@ -1,0 +1,28 @@
+# The first trained model against its own base. Both run on the same Modal GPU
+# with the same settings, so the difference comes from training alone. See
+# configs/runs/qwen3.5-9b-sft-opus-1.toml for the run and its gate.
+
+name = "sft-opus-1-vs-base"
+eval_set = "flores200-devtest-en-ceb"
+resamples = 2000
+seed = "flywheel-v1"
+max_cost_usd = 2.0            # each Modal model is refused unless its worst case fits
+max_output_ratio = 5.0
+
+[[models]]
+id = "flywheel/qwen3.5-9b-sft-opus-1"
+role = "base"                 # the model under test
+host = "modal"
+weights = "run:qwen3.5-9b-sft-opus-1"
+
+[[models]]
+id = "modal/qwen3.5-9b"
+role = "compare"              # the model it must beat: its own base, before training
+host = "modal"
+weights = "hf:Qwen/Qwen3.5-9B"
+
+[judge]
+model = "claude-opus-5-5"
+family = "anthropic"
+effort = "low"
+sentences = 200

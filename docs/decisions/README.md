@@ -19,3 +19,4 @@ One short file per decision, so a reader can see the reasoning as well as the ou
 | [0013](0013-registry-and-run-configs.md) | Model registry and run configs | Accepted |
 | [0014](0014-training-on-together.md) | Training on Together | Accepted |
 | [0015](0015-public-parallel-text.md) | Public parallel text for the first training data | Accepted |
+| [0016](0016-offline-eval-on-modal.md) | Evaluate trained models on Modal | Accepted |

@@ -34,7 +34,8 @@ The first three make up the translation app's free compare set. The other three 
 | Base model checks: export, license, GPU fit | Done, see [0011](docs/decisions/0011-base-model-checks.md) |
 | Datasets: SFT and DPO builders, hashed snapshots, data cards | Done |
 | Registry: run configs, status history, model cards | Done |
-| Training, promotion gates | Planned |
+| Training on Together: upload, price, start, status, download | Built, not yet run |
+| Promotion gates | Planned |
 | Live integration | Planned |
 
 The full design is in [PLAN.md](PLAN.md), and the reasoning behind major choices is in [docs/decisions](docs/decisions).
@@ -64,6 +65,17 @@ uv run flywheel report                        # free, and can be rerun at any ti
 ```
 
 The report is written to `data/runs/`. For human scoring, `flywheel rate export --round m2-a` writes a blind sheet and a separate key, and `flywheel rate import` loads the scores. Raters follow [docs/rating-guide.md](docs/rating-guide.md).
+
+### Train a model
+
+Training needs `TOGETHER_API_KEY` and runs from a checked-in config, such as a copy of [configs/run.example.toml](configs/run.example.toml) that names a built snapshot.
+
+```sh
+uv run flywheel train start configs/runs/<name>.toml          # uploads the file and shows the price
+uv run flywheel train start configs/runs/<name>.toml --yes    # starts the job, once
+uv run flywheel train status <name>                           # registers it as a candidate when done
+uv run flywheel train download <name>                         # merged weights, about 19 GB for 9B
+```
 
 ## How curation protects the evaluation
 

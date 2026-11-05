@@ -3,6 +3,9 @@
 import hashlib
 import json
 import os
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -25,7 +28,9 @@ from flywheel.schema import CuratedEvent, EvalSegment, FeedbackEvent, HumanRatin
 from flywheel.schema.export import stale_schemas, write_schemas
 from flywheel.scrub import scrub_events
 from flywheel.storage import append_jsonl, read_jsonl, write_json, write_jsonl
+from flywheel.train import run as training
 from flywheel.train.config import RunConfig, config_hash
+from flywheel.train.together import Together, TogetherError
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
 ingest_app = typer.Typer(
@@ -40,6 +45,8 @@ build_app = typer.Typer(no_args_is_help=True, help="Build training datasets from
 app.add_typer(build_app, name="build")
 registry_app = typer.Typer(no_args_is_help=True, help="Trained models, their status and cards.")
 app.add_typer(registry_app, name="registry")
+train_app = typer.Typer(no_args_is_help=True, help="Fine-tune through Together AI.")
+app.add_typer(train_app, name="train")
 
 DataDir = Annotated[Path, typer.Option(help="Where pipeline data lives. Never committed.")]
 Config = Annotated[Path, typer.Option(help="An eval TOML file.")]
@@ -256,6 +263,126 @@ def registry_card(model_id: str, data_dir: DataDir = Path("data")) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(card, encoding="utf-8")
     typer.echo(f"wrote {path}")
+
+
+def _together() -> Together:
+    api_key = os.environ.get("TOGETHER_API_KEY")
+    if not api_key:
+        typer.echo("TOGETHER_API_KEY is not set.", err=True)
+        raise typer.Exit(code=1)
+    return Together(api_key)
+
+
+@contextmanager
+def _training_errors() -> Iterator[None]:
+    try:
+        yield
+    except (training.RunRefused, TogetherError) as err:
+        typer.echo(str(err), err=True)
+        raise typer.Exit(code=1) from err
+
+
+def _from_checkpoint(config: RunConfig, data_dir: Path) -> str | None:
+    if config.start_from is None:
+        return None
+    registry = _registry(data_dir)
+    try:
+        parent = registry.get(config.start_from)
+    except KeyError:
+        raise typer.BadParameter(f"start_from {config.start_from} is not registered") from None
+    finally:
+        registry.close()
+    if parent.provider != training.PROVIDER or parent.provider_job_id is None:
+        raise typer.BadParameter(f"{parent.id} was not trained on Together, so it cannot continue")
+    return parent.provider_job_id
+
+
+@train_app.command("start")
+def train_start(run_config: Path, yes: Confirm = False, data_dir: DataDir = Path("data")) -> None:
+    """Upload the dataset and price the job, then start it with --yes."""
+    config = RunConfig.from_toml(run_config)
+    registry = _registry(data_dir)
+    try:
+        if any(m.id == config.name for m in registry.models()):
+            raise typer.BadParameter(f"{config.name} is already registered. Use a new run name.")
+    finally:
+        registry.close()
+    parent = _from_checkpoint(config, data_dir)
+    client = _together()
+    with _training_errors():
+        state = training.prepare(config, run_config, data_dir, client, parent, time.sleep)
+        if state.job_id is not None:
+            typer.echo(f"{config.name} already started as job {state.job_id} ({state.status})")
+            return
+        typer.echo(
+            f"{config.base_model}, LoRA {config.method.upper()}: {state.lines} examples, "
+            f"about {state.estimate_tokens} training tokens, estimated ${state.estimate_usd:.2f} "
+            f"(limit ${config.max_cost_usd:.2f})"
+        )
+        for reason, count in sorted(state.skipped.items()):
+            typer.echo(f"skipped {count} ({reason})")
+        typer.echo("The training file is uploaded to Together, which is free, to get this price.")
+        meta = _snapshot_manifest(data_dir, config.dataset)
+        writers = (
+            (meta or {})
+            .get("counts", {})
+            .get("target_models" if config.method == "sft" else "chosen_models", {})
+        )
+        if writers:
+            listed = ", ".join(f"{model} ({count})" for model, count in writers.items())
+            typer.echo(f"answers to learn were written by: {listed}")
+        if not yes:
+            typer.echo("No job started. Add --yes to start it.")
+            return
+        state = training.submit(config, run_config, data_dir, client, parent)
+    typer.echo(
+        f"started job {state.job_id}. Check on it with `flywheel train status {config.name}`."
+    )
+
+
+@train_app.command("status")
+def train_status(name: str, data_dir: DataDir = Path("data")) -> None:
+    """Check a job, and register the model as a candidate once it completes."""
+    if not (training.run_dir(data_dir, name) / "state.json").exists():
+        raise typer.BadParameter(f"no training run named {name}")
+    with _training_errors():
+        state = training.refresh(data_dir, name, _together())
+    typer.echo(f"{name}: {state.status}")
+    if state.status in ("error", "cancelled"):
+        typer.echo("Together refunds failed jobs. Cancelled jobs bill completed steps only.")
+    if state.status != "completed":
+        return
+    registry = _registry(data_dir)
+    try:
+        if not any(m.id == name for m in registry.models()):
+            config = RunConfig.from_toml(Path(state.run_config))
+            registry.register(training.candidate_record(state, config))
+            typer.echo(f"registered {name} as a candidate")
+    finally:
+        registry.close()
+
+
+@train_app.command("download")
+def train_download(name: str, data_dir: DataDir = Path("data")) -> None:
+    """Download the merged weights of a completed job. A 9B model is about 19 GB."""
+    state_path = training.run_dir(data_dir, name) / "state.json"
+    if not state_path.exists():
+        raise typer.BadParameter(f"no training run named {name}")
+    state = training.TrainingState.load(state_path)
+    if state.status != "completed" or state.job_id is None:
+        raise typer.BadParameter(f"{name} is {state.status}, not completed")
+    destination = training.run_dir(data_dir, name) / "merged.tar.zst"
+    with _training_errors():
+        size = _together().download(state.job_id, destination)
+    state.weights = destination.as_posix()
+    state.save(state_path)
+    registry = _registry(data_dir)
+    try:
+        if any(m.id == name for m in registry.models()):
+            registry.update(name, weights=state.weights)
+    finally:
+        registry.close()
+    typer.echo(f"wrote {destination} ({size / 1e9:.1f} GB)")
 
 
 def _load_segments(config: EvalConfig, data_dir: Path) -> list[EvalSegment]:

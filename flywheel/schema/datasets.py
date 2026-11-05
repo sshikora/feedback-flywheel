@@ -14,6 +14,9 @@ class SftExample(Record):
     src_lang: str
     tgt_lang: str
     tone: str | None = None
+    auto_detect: bool = Field(
+        description="The user left the source language on auto, so the app asked for JSON."
+    )
     source: str = Field(min_length=1)
     target: str = Field(min_length=1)
     target_models: list[str] = Field(min_length=1, description="Models that wrote the target.")
@@ -27,6 +30,9 @@ class DpoPair(Record):
     src_lang: str
     tgt_lang: str
     tone: str | None = None
+    auto_detect: bool = Field(
+        description="The user left the source language on auto, so the app asked for JSON."
+    )
     source: str = Field(min_length=1)
     chosen: str = Field(min_length=1)
     chosen_models: list[str] = Field(min_length=1)

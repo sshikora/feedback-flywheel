@@ -43,6 +43,7 @@ def build_sft(items: Sequence[CuratedEvent], config: DatasetConfig) -> Build[Sft
                 src_lang=event.input.effective_src_lang,
                 tgt_lang=event.input.tgt_lang,
                 tone=event.input.tone,
+                auto_detect=event.input.src_lang is None,
                 source=event.input.text,
                 target=text,
                 target_models=models,
@@ -73,6 +74,8 @@ def build_dpo(items: Sequence[CuratedEvent], config: DatasetConfig) -> Build[Dpo
 
 
 def _event_reason(item: CuratedEvent, config: DatasetConfig, contested_allowed: bool) -> str | None:
+    if config.target_languages and item.event.input.tgt_lang not in config.target_languages:
+        return "other_language"
     if item.quality < config.min_quality:
         return "low_quality"
     if item.contested and not contested_allowed:
@@ -116,6 +119,7 @@ def _pairs(
                 src_lang=event.input.effective_src_lang,
                 tgt_lang=event.input.tgt_lang,
                 tone=event.input.tone,
+                auto_detect=event.input.src_lang is None,
                 source=event.input.text,
                 chosen=text,
                 chosen_models=models,

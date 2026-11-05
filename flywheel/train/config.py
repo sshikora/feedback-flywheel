@@ -45,6 +45,7 @@ class RunConfig(Strict):
         pattern=r"^[0-9a-f]{64}$", description="Snapshot hash from `flywheel build`."
     )
     seed: int
+    max_cost_usd: float = Field(gt=0, description="The job is refused above this estimate.")
     hyperparameters: Hyperparameters
     gate: GateConfig
 

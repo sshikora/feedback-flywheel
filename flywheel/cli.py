@@ -503,7 +503,11 @@ def _translate_on_modal(
         with _training_errors():
             url = _together().download_url(state.job_id)
     typer.echo(f"{spec.id}: {len(segments)} sentences on Modal")
-    records = hosted.translate_on_modal(spec, segments, url)
+    try:
+        records = hosted.translate_on_modal(spec, segments, url)
+    except hosted.HostError as err:
+        typer.echo(f"stopped: Modal said {err}. Finished work is saved.", err=True)
+        raise typer.Exit(code=1) from err
     append_jsonl(path, records)
     return sum(record.cost_usd for record in records)
 

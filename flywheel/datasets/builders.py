@@ -76,6 +76,8 @@ def build_dpo(items: Sequence[CuratedEvent], config: DatasetConfig) -> Build[Dpo
 def _event_reason(item: CuratedEvent, config: DatasetConfig, contested_allowed: bool) -> str | None:
     if config.target_languages and item.event.input.tgt_lang not in config.target_languages:
         return "other_language"
+    if item.event.source in config.exclude_sources:
+        return "excluded_source"
     if item.quality < config.min_quality:
         return "low_quality"
     if item.contested and not contested_allowed:

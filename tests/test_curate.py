@@ -1,15 +1,17 @@
+import random
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from flywheel.curate.config import CurationConfig
 from flywheel.curate.dedupe import dedupe, independent_votes
-from flywheel.curate.leakage import LeakageIndex, leaks
+from flywheel.curate.leakage import LeakageIndex, leaks, trigrams
 from flywheel.curate.pipeline import curate, is_heldout
 from flywheel.curate.quality import quality_score, spam_reason
 from flywheel.curate.report import origin_shares, vote_statistics
 from flywheel.schema import Consent, EventContext, TranslationInput
-from tests.factories import make_event, make_segment
+from flywheel.text import normalize_text
+from tests.factories import make_event, make_reference, make_segment
 
 NO_HOLDOUT = CurationConfig(heldout_pct=0)
 WINDOW = 600
@@ -155,6 +157,55 @@ def test_unrelated_text_is_not_a_match():
 
 def test_empty_index_matches_nothing():
     assert not LeakageIndex([], 0.8).matches(EVAL_SENTENCE)
+
+
+@pytest.mark.parametrize("threshold", [0.4, 0.6, 0.8])
+def test_the_filters_find_exactly_what_comparing_everything_finds(threshold):
+    rng = random.Random(7)
+    words = [
+        "ang",
+        "sa",
+        "mga",
+        "ug",
+        "nga",
+        "si",
+        "ko",
+        "ka",
+        "the",
+        "a",
+        "of",
+        "to",
+        "and",
+        "is",
+        "in",
+        "it",
+        "market",
+        "river",
+        "house",
+    ]
+
+    def sentence() -> str:
+        return " ".join(rng.choice(words) for _ in range(rng.randint(1, 20)))
+
+    def edit(text: str) -> str:
+        tokens = text.split()
+        tokens[rng.randrange(len(tokens))] = rng.choice(words)
+        return " ".join(tokens)
+
+    indexed = [sentence() for _ in range(150)]
+    probes = [edit(rng.choice(indexed)) for _ in range(150)] + [sentence() for _ in range(150)]
+
+    def brute_force(text: str) -> bool:
+        grams = trigrams(normalize_text(text))
+        return any(
+            len(grams & other) / len(grams | other) >= threshold
+            for other in (trigrams(normalize_text(t)) for t in indexed)
+        )
+
+    index = LeakageIndex(indexed, threshold)
+    found = [index.matches(text) for text in probes]
+    assert found == [brute_force(text) for text in probes]
+    assert 0 < sum(found) < len(probes)
 
 
 @pytest.mark.parametrize(
@@ -303,3 +354,32 @@ def test_the_report_never_contains_text():
     event = make_event(text="A very identifiable sentence about my neighbour.")
     report = curate([event], [], NO_HOLDOUT).report
     assert "identifiable" not in str(report)
+
+
+def test_corpus_references_are_not_counted_as_votes():
+    stats = vote_statistics([make_event(), make_reference()])
+    assert stats["votes"] == 1
+    assert "human:opus-tatoeba" not in stats["by_model"]
+
+
+def test_a_corpus_reference_is_curated_like_any_event():
+    result = curate([make_reference()], [], NO_HOLDOUT)
+    assert [item.event.id for item in result.train] == ["r1"]
+    assert result.report["train_origin"]["human_share"] == 1.0
+    assert result.report["vote_statistics"]["votes"] == 0
+
+
+def test_a_corpus_reference_that_matches_flores_is_dropped():
+    leaked = make_reference(text=EVAL_SENTENCE, translation="Usa ka lahi nga hubad.")
+    result = curate([leaked], [make_segment(source=EVAL_SENTENCE)], NO_HOLDOUT)
+    assert result.train == []
+    assert result.report["dropped"] == {"leak_fixed_eval": 1}
+
+
+def test_a_reference_names_exactly_one_candidate():
+    from pydantic import ValidationError
+
+    from flywheel.schema import ReferenceSignal
+
+    with pytest.raises(ValidationError):
+        ReferenceSignal(chosen=["human:a", "human:b"])

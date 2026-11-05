@@ -78,6 +78,10 @@ def _dataset_lines(dataset: dict[str, Any] | None) -> list[str]:
         f"- **Size:** {counts['examples']} records from {counts['events']} curated events",
         f"- **Human share:** {counts['origin']['human_share']:.0%}",
         "- **Sources:** " + ", ".join(f"{k} ({v})" for k, v in counts["sources"].items()),
+        *(
+            f"- **Credit for {source}:** {corpus['license']}. {corpus['attribution']}"
+            for source, corpus in dataset.get("licenses", {}).items()
+        ),
     ]
 
 

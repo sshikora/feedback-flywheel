@@ -14,6 +14,7 @@ class DatasetConfig(BaseModel):
     sft_contested: bool = True
     dpo_contested: bool = False
     exclude_models: list[str] = Field(default_factory=list)
+    exclude_sources: list[str] = Field(default_factory=list)
     close_pair_chrf: float = Field(default=70.0, gt=0, le=100)
 
     @classmethod

@@ -29,7 +29,7 @@ def render_card(meta: dict[str, Any]) -> str:
         _table("Language pair", counts["language_pairs"]),
     ]
     if meta["kind"] == "sft":
-        lines.append(_table("Model that wrote the target", counts["target_models"]))
+        lines.append(_table("Who wrote the target", counts["target_models"]))
     else:
         lines.append(_table("Model that wrote the chosen answer", counts["chosen_models"]))
         lines.append(_table("Model that wrote the rejected answer", counts["rejected_models"]))
@@ -43,22 +43,24 @@ def render_card(meta: dict[str, Any]) -> str:
         *_limits(meta),
         "",
     ]
+    if meta["licenses"]:
+        lines += ["## Licenses", "", *_licenses(meta["licenses"]), ""]
     return "\n".join(lines)
 
 
 def _limits(meta: dict[str, Any]) -> list[str]:
     counts = meta["counts"]
     limits = []
-    if counts["events"] and counts["blind_share"] < 1:
+    if counts["votes"] and counts["blind_share"] < 1:
         unblind = round((1 - counts["blind_share"]) * 100)
         limits.append(
-            f"- {unblind}% of events come from votes cast with model names visible, "
+            f"- {unblind}% of votes ({counts['votes']}) were cast with model names visible, "
             "so they carry brand bias. They are training signal, never evaluation."
         )
     if counts["contested_events"]:
         limits.append(
             f"- {counts['contested_events']} events are contested: voters on the same input "
-            "chose different answers."
+            "chose different answers, or a corpus gave more than one translation."
         )
     if meta["kind"] == "dpo" and counts["close_pairs"]:
         limits.append(
@@ -67,6 +69,13 @@ def _limits(meta: dict[str, Any]) -> list[str]:
             "the rejected answer is often also correct, so the pair is a weak signal."
         )
     return limits or ["- None recorded."]
+
+
+def _licenses(corpora: dict[str, dict[str, str]]) -> list[str]:
+    return [
+        f"- **{source}:** {corpus['license']}. {corpus['attribution']}"
+        for source, corpus in corpora.items()
+    ]
 
 
 def _table(heading: str, values: dict[str, Any], column: str = "Count") -> str:

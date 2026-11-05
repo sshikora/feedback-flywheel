@@ -1,11 +1,12 @@
 """The feedback event: one record type for all sources.
 
-`signal` has a single kind in v1. Correction and implicit signals join as a
-discriminated union once a source actually produces them.
+`signal` is a union on `kind`. A preference is a vote. A reference is a human
+translation from a public corpus, where nobody voted. Correction and implicit
+signals join the union once a source actually produces them.
 """
 
 from datetime import datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -51,8 +52,22 @@ class PreferenceSignal(Record):
     )
 
 
+class ReferenceSignal(Record):
+    """A human translation from a public corpus. Its one candidate is that translation."""
+
+    kind: Literal["reference"] = "reference"
+    chosen: list[str] = Field(
+        min_length=1, max_length=1, description="The model id of the reference candidate."
+    )
+
+
+Signal = Annotated[PreferenceSignal | ReferenceSignal, Field(discriminator="kind")]
+
+
 class EventContext(Record):
-    blind: bool = Field(description="False when the rater could see model names.")
+    blind: bool = Field(
+        description="False when the rater could see model names. True when no model was shown."
+    )
     your_model: str | None = Field(default=None, description="The rater's usual model, if any.")
     model_set: str | None = Field(default=None, description="Which candidate set was offered.")
     ui_version: str | None = None
@@ -71,7 +86,7 @@ class FeedbackEvent(Record):
     task: Literal["translation"] = "translation"
     input: TranslationInput
     candidates: list[Candidate] = Field(min_length=1)
-    signal: PreferenceSignal
+    signal: Signal
     context: EventContext
     consent: Consent
 
@@ -87,6 +102,10 @@ class FeedbackEvent(Record):
     def chosen_output(self) -> str:
         chosen = set(self.signal.chosen)
         return next(c.output for c in self.candidates if c.model_id in chosen and c.output)
+
+    @property
+    def is_vote(self) -> bool:
+        return self.signal.kind == "preference"
 
     @property
     def answered_candidates(self) -> list[Candidate]:

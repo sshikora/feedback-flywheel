@@ -26,7 +26,7 @@ The first three make up the translation app's free compare set. The other three 
 | Stage | State |
 |---|---|
 | Event schema, JSON Schema export | Done |
-| Ingest: JSONL, comparisons export, FLORES-200 | Done |
+| Ingest: JSONL, comparisons export, FLORES-200, human-translated OPUS corpora | Done |
 | Curation: PII and secret scrubbing, dedupe, quality scoring, leakage protection | Done |
 | Evaluation harness: chrF++, blind judge, human ratings, HTML report | Done |
 | Baseline: machine scores | Done |
@@ -47,12 +47,14 @@ Requires [uv](https://docs.astral.sh/uv/).
 ```sh
 uv sync
 uv run flywheel ingest flores --src en --tgt ceb --split devtest
+uv run flywheel ingest flores --src en --tgt ceb --split dev
+uv run flywheel ingest opus tatoeba    # and translatewiki, bible-uedin
 uv run flywheel ingest comparisons tests/fixtures/comparisons_scan.json --training-from 2026-10-27
 uv run flywheel curate
 uv run flywheel build sft    # and `build dpo`
 ```
 
-Votes may train only if they were cast after `--training-from`, the date the app's privacy page began naming the training provider. Without it, none may. Output lands in `data/`, which is never committed. `data/curated/report.json` has the counts behind each decision: what was dropped and why, the human versus synthetic share, and vote statistics by model. Each build writes a snapshot to `data/datasets/`, named by the hash of its examples, with a manifest and a data card.
+Both FLORES splits are loaded so that curation keeps their text out of training. The OPUS corpora are the ones whose license and origin passed the check in [0015](docs/decisions/0015-public-parallel-text.md), and each data card credits them. Votes may train only if they were cast after `--training-from`, the date the app's privacy page began naming the training provider. Without it, none may. Output lands in `data/`, which is never committed. `data/curated/report.json` has the counts behind each decision: what was dropped and why, the human versus synthetic share, and vote statistics by model. Each build writes a snapshot to `data/datasets/`, named by the hash of its examples, with a manifest and a data card.
 
 ### Evaluate models
 

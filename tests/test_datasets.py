@@ -7,7 +7,7 @@ from flywheel.datasets.card import render_card
 from flywheel.datasets.config import DatasetConfig
 from flywheel.datasets.snapshot import content_hash, manifest, write_snapshot
 from flywheel.schema import Candidate, CuratedEvent, EventContext, FeedbackEvent
-from tests.factories import make_event
+from tests.factories import make_event, make_reference
 
 DEFAULTS = DatasetConfig()
 SOURCE = {"path": "curated/train.jsonl", "sha256": "0" * 64}
@@ -174,7 +174,7 @@ def test_the_data_card_names_the_hash_and_the_brand_bias():
     meta = manifest("dpo", build, DEFAULTS, SOURCE)
     card = render_card(meta)
     assert meta["hash"] in card
-    assert "100% of events come from votes cast with model names visible" in card
+    assert "100% of votes (2) were cast with model names visible" in card
     assert "| B | 2 |" in card
 
 
@@ -184,3 +184,33 @@ def test_a_card_for_blind_events_records_no_brand_bias():
     card = render_card(manifest("sft", build, DEFAULTS, SOURCE))
     assert "brand bias" not in card
     assert json.loads(json.dumps(build.examples[0].model_dump()))["target"] == "Asa ang merkado?"
+
+
+def test_a_source_can_be_left_out_of_a_build():
+    items = [curated(make_event()), curated(make_reference(source="opus-bible-uedin"))]
+    config = DatasetConfig(exclude_sources=["opus-bible-uedin"])
+    build = build_sft(items, config)
+    assert [e.id for e in build.examples] == ["e1"]
+    assert build.dropped == {"excluded_source": 1}
+
+
+def test_a_corpus_reference_trains_sft_but_makes_no_dpo_pair():
+    items = [curated(make_reference())]
+    (example,) = build_sft(items, DEFAULTS).examples
+    assert (example.target, example.target_models) == ("Asa ang merkado?", ["human:opus-tatoeba"])
+    assert build_dpo(items, DEFAULTS).dropped == {"no_rejected": 1}
+
+
+def test_brand_bias_is_measured_over_votes_and_licenses_are_listed():
+    items = [curated(make_event()), curated(make_reference(text="Thank you."))]
+    meta = manifest("sft", build_sft(items, DEFAULTS), DEFAULTS, SOURCE)
+    assert (meta["counts"]["votes"], meta["counts"]["blind_share"]) == (1, 0.0)
+    assert list(meta["licenses"]) == ["opus-tatoeba"]
+    card = render_card(meta)
+    assert "100% of votes (1) were cast with model names visible" in card
+    assert "## Licenses" in card and "**opus-tatoeba:** CC BY 2.0 FR." in card
+
+
+def test_a_card_without_corpus_text_has_no_license_section():
+    card = render_card(manifest("sft", build_sft(build_items(), DEFAULTS), DEFAULTS, SOURCE))
+    assert "## Licenses" not in card

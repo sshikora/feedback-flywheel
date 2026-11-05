@@ -19,6 +19,7 @@ from flywheel.curate.report import language_pairs, origin_shares
 from flywheel.datasets.builders import Build
 from flywheel.datasets.card import render_card
 from flywheel.datasets.config import DatasetConfig
+from flywheel.ingest.opus import licenses
 from flywheel.schema import DpoPair, SftExample
 from flywheel.storage import write_json
 
@@ -47,6 +48,7 @@ def manifest(
     source: dict[str, Any],
 ) -> dict[str, Any]:
     events = [item.event for item in build.used]
+    votes = [e for e in events if e.is_vote]
     counts: dict[str, Any] = {
         "examples": len(build.examples),
         "events": len(events),
@@ -55,9 +57,8 @@ def manifest(
         "sources": dict(sorted(Counter(e.source for e in events).items())),
         "language_pairs": language_pairs(events),
         "contested_events": sum(item.contested for item in build.used),
-        "blind_share": round(sum(e.context.blind for e in events) / len(events), 4)
-        if events
-        else 0.0,
+        "votes": len(votes),
+        "blind_share": round(sum(e.context.blind for e in votes) / len(votes), 4) if votes else 0.0,
     }
     if kind == "sft":
         counts["target_models"] = _model_counts(
@@ -76,6 +77,7 @@ def manifest(
         "config": config.model_dump(),
         "source": source,
         "counts": counts,
+        "licenses": licenses(counts["sources"]),
     }
 
 

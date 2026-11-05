@@ -67,7 +67,7 @@
       "additionalProperties": false,
       "properties": {
         "blind": {
-          "description": "False when the rater could see model names.",
+          "description": "False when the rater could see model names. True when no model was shown.",
           "title": "Blind",
           "type": "boolean"
         },
@@ -139,6 +139,33 @@
         "chosen"
       ],
       "title": "PreferenceSignal",
+      "type": "object"
+    },
+    "ReferenceSignal": {
+      "additionalProperties": false,
+      "description": "A human translation from a public corpus. Its one candidate is that translation.",
+      "properties": {
+        "kind": {
+          "const": "reference",
+          "default": "reference",
+          "title": "Kind",
+          "type": "string"
+        },
+        "chosen": {
+          "description": "The model id of the reference candidate.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "title": "Chosen",
+          "type": "array"
+        }
+      },
+      "required": [
+        "chosen"
+      ],
+      "title": "ReferenceSignal",
       "type": "object"
     },
     "TranslationInput": {
@@ -243,7 +270,22 @@
       "type": "array"
     },
     "signal": {
-      "$ref": "#/$defs/PreferenceSignal"
+      "discriminator": {
+        "mapping": {
+          "preference": "#/$defs/PreferenceSignal",
+          "reference": "#/$defs/ReferenceSignal"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PreferenceSignal"
+        },
+        {
+          "$ref": "#/$defs/ReferenceSignal"
+        }
+      ],
+      "title": "Signal"
     },
     "context": {
       "$ref": "#/$defs/EventContext"

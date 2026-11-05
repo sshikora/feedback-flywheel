@@ -18,3 +18,4 @@ One short file per decision, so a reader can see the reasoning as well as the ou
 | [0012](0012-dataset-builds.md) | How training datasets are built | Accepted |
 | [0013](0013-registry-and-run-configs.md) | Model registry and run configs | Accepted |
 | [0014](0014-training-on-together.md) | Training on Together | Accepted |
+| [0015](0015-public-parallel-text.md) | Public parallel text for the first training data | Accepted |

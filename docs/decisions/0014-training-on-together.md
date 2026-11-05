@@ -13,7 +13,7 @@
 - **A completed job registers itself.** `flywheel train status` registers the model as a candidate when the job completes. The cost recorded is Together's dollar estimate, because the unit of the job's own `total_price` field is not documented. The first real job will settle that.
 - **Download the merged weights.** The merged checkpoint is self-contained and serves on vLLM without a separate adapter step. It is about 19 GB for Qwen3.5 9B.
 
-**Cost.** For Qwen3.5 9B, LoRA SFT costs $0.34 per million tokens and DPO $0.84, with a $4.00 minimum per job. A first dataset of a few thousand short sentence pairs is likely to fall under the minimum, so a run should cost about $4. Together also requires a $100 minimum credit balance.
+**Cost.** For Qwen3.5 9B, LoRA SFT costs $0.34 per million tokens and DPO $0.84, with a $4.00 minimum per job. A first dataset of a few thousand short sentence pairs is likely to fall under the minimum, so a run should cost about $4. There is no fixed minimum balance: the first credit purchase is at least $15, and the balance must cover the job. The price estimate reports the account's limit and whether the job may proceed, and `train start` refuses when it may not.
 
 **Not covered.** Real votes reach Together only under `0009`: after the privacy page names it, and only for votes cast after that change. The question of training on Gemini-written answers from `0011` is settled with `exclude_models` when the first dataset is built, and `train start` lists which models wrote the answers to learn.
 

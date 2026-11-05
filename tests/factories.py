@@ -10,6 +10,7 @@ from flywheel.schema import (
     EventContext,
     FeedbackEvent,
     PreferenceSignal,
+    ReferenceSignal,
     TranslationInput,
 )
 
@@ -42,6 +43,25 @@ def make_event(
         "consent": Consent(training=True, publish=False),
     }
     return FeedbackEvent(**(fields | overrides))
+
+
+def make_reference(
+    event_id: str = "r1",
+    text: str = "Where is the market?",
+    translation: str = "Asa ang merkado?",
+    source: str = "opus-tatoeba",
+) -> FeedbackEvent:
+    """A corpus pair, as the OPUS loader stores it."""
+    reference = f"human:{source}"
+    return make_event(
+        event_id,
+        text=text,
+        outputs={reference: translation},
+        source=source,
+        signal=ReferenceSignal(chosen=[reference]),
+        context=EventContext(blind=True),
+        consent=Consent(training=True, publish=True),
+    )
 
 
 def make_segment(

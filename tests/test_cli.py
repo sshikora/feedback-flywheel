@@ -3,6 +3,7 @@
 import json
 import re
 import tarfile
+import zipfile
 from io import BytesIO
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from flywheel.cli import app
-from flywheel.ingest import flores
+from flywheel.ingest import flores, opus
 from flywheel.schema import CuratedEvent, EvalSegment
 from flywheel.storage import read_jsonl, write_jsonl
 from tests.factories import make_event
@@ -148,3 +149,34 @@ def test_a_run_config_must_name_a_built_snapshot(tmp_path):
     example = Path(__file__).parent.parent / "configs" / "run.example.toml"
     output = fail("registry", "add", example, "--provider", "together", "--data-dir", tmp_path)
     assert f"has hash {'0' * 64}" in output
+
+
+def test_ingest_a_corpus_and_build_from_it(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    archive = cache / "opus" / opus.CORPORA["tatoeba"].archive_name
+    archive.parent.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("Tatoeba.ceb-en.en", "I woke up at five.\nEdit $1\n")
+        zipped.writestr("Tatoeba.ceb-en.ceb", "Alas singko ko mibangon.\nUsba ang $1\n")
+    monkeypatch.setattr(opus, "_verify", lambda _archive, _spec: None)
+    data = tmp_path / "data"
+
+    output = run("ingest", "opus", "tatoeba", "--data-dir", data, "--cache-dir", cache)
+    assert "skipped 1 (markup)" in output
+    assert "CC BY 2.0 FR" in output
+    assert "stored 1 events" in output
+
+    config = tmp_path / "curation.toml"
+    config.write_text("heldout_pct = 0\n")
+    run("curate", "--data-dir", data, "--config", config)
+    run("build", "sft", "--data-dir", data)
+    (snapshot,) = (data / "datasets").iterdir()
+    card = (snapshot / "DATA_CARD.md").read_text()
+    assert "| human:opus-tatoeba | 1 |" in card
+    assert "**opus-tatoeba:** CC BY 2.0 FR." in card
+
+
+def test_an_unknown_corpus_is_refused(tmp_path):
+    assert "unknown corpus 'wikimedia'" in fail(
+        "ingest", "opus", "wikimedia", "--data-dir", tmp_path
+    )

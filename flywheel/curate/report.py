@@ -3,6 +3,7 @@
 Model names were visible when people voted, so these numbers describe preference and
 brand bias together. They are never evaluation results. Win rate divides by appearances
 because the free and paid candidate sets differ, which makes raw vote share misleading.
+Corpus references are not votes, so vote statistics leave them out.
 """
 
 from collections import Counter
@@ -13,6 +14,7 @@ from flywheel.schema import FeedbackEvent
 
 
 def vote_statistics(events: Sequence[FeedbackEvent]) -> dict[str, Any]:
+    events = [event for event in events if event.is_vote]
     wins: Counter[str] = Counter()
     appearances: Counter[str] = Counter()
     own_model_votes = own_model_picks = 0

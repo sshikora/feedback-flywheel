@@ -6,5 +6,6 @@ min_quality = 0.0        # curated quality score an event needs, from 0 to 1
 sft_contested = true     # keep events where voters chose different answers, for SFT
 dpo_contested = false    # and for DPO, where the rejected answer was someone's choice
 exclude_models = []      # drop any text written only by these models
+exclude_sources = []     # drop every event from these sources, such as ["opus-bible-uedin"]
 close_pair_chrf = 70.0   # chrF++ between chosen and rejected that marks a pair as close. In the M2
                          # baseline, Gemini and DeepSeek answers to the same sentence had a median of 70.2.

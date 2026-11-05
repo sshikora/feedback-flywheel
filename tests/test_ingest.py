@@ -3,12 +3,14 @@ import hashlib
 import io
 import json
 import tarfile
+import zipfile
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from flywheel.ingest import comparisons, flores, jsonl
+from flywheel.ingest import comparisons, flores, jsonl, opus
 from flywheel.ingest.comparisons import load_comparisons
 from flywheel.storage import write_jsonl
 from tests.factories import make_event
@@ -157,3 +159,83 @@ def test_flores_accepts_an_archive_with_the_pinned_hash(tmp_path, monkeypatch):
     monkeypatch.setattr(flores, "FLORES_SHA256", hashlib.sha256(content).hexdigest())
     (tmp_path / flores.ARCHIVE_NAME).write_bytes(content)
     assert flores.fetch_archive(tmp_path).name == flores.ARCHIVE_NAME
+
+
+def _opus_archive(path: Path, name: str, english: list[str], cebuano: list[str]) -> Path:
+    stem = opus.CORPORA[name].opus_name
+    with zipfile.ZipFile(path, "w") as zipped:
+        zipped.writestr(f"{stem}.ceb-en.en", "".join(line + "\n" for line in english))
+        zipped.writestr(f"{stem}.ceb-en.ceb", "".join(line + "\n" for line in cebuano))
+    return path
+
+
+def test_a_corpus_pair_becomes_a_reference_event(tmp_path):
+    archive = _opus_archive(tmp_path / "t.zip", "tatoeba", ["Please have a drink."], ["Tagay."])
+    (event,) = opus.load_events(archive, "tatoeba").events
+    assert event.id == "opus:tatoeba:v2026-07-08:en-ceb:0"
+    assert (event.source, event.origin) == ("opus-tatoeba", "human")
+    assert (event.input.text, event.chosen_output) == ("Please have a drink.", "Tagay.")
+    assert (event.input.src_lang, event.input.tgt_lang) == ("en", "ceb")
+    assert event.signal.kind == "reference" and not event.is_vote
+    assert event.consent.training and event.consent.publish
+
+
+def test_the_other_direction_swaps_the_sides(tmp_path):
+    archive = _opus_archive(tmp_path / "t.zip", "tatoeba", ["Wait."], ["Hulat."])
+    (event,) = opus.load_events(archive, "tatoeba", src="ceb", tgt="en").events
+    assert (event.input.text, event.chosen_output) == ("Hulat.", "Wait.")
+
+
+@pytest.mark.parametrize(
+    ("english", "cebuano", "reason"),
+    [
+        ("Edit $1", "Usba ang $1", "markup"),
+        ("{{PLURAL:$1|page|pages}}", "panid", "markup"),
+        ("Line<br>break", "Linya", "markup"),
+        ("&lt; &lt; A Psalm by David. &gt; &gt;", "Salmo ni David.", "markup"),
+        ("Tools", "  ", "empty"),
+    ],
+)
+def test_markup_and_empty_pairs_are_skipped(tmp_path, english, cebuano, reason):
+    archive = _opus_archive(tmp_path / "w.zip", "translatewiki", [english], [cebuano])
+    result = opus.load_events(archive, "translatewiki")
+    assert result.events == []
+    assert result.skipped == {reason: 1}
+
+
+def test_a_corpus_is_refused_for_another_pair_or_when_unknown(tmp_path):
+    with pytest.raises(ValueError, match="pinned for ceb-en"):
+        opus.load_events(tmp_path / "unused", "tatoeba", src="en", tgt="tl")
+    with pytest.raises(ValueError, match="unknown corpus"):
+        opus.load_events(tmp_path / "unused", "wikimedia")
+
+
+def test_a_misaligned_corpus_is_refused(tmp_path):
+    archive = _opus_archive(tmp_path / "t.zip", "tatoeba", ["One.", "Two."], ["Usa."])
+    with pytest.raises(ValueError, match="misaligned"):
+        opus.load_events(archive, "tatoeba")
+
+
+def test_a_corpus_download_with_the_wrong_hash_is_refused(tmp_path):
+    archive = tmp_path / "opus" / opus.CORPORA["tatoeba"].archive_name
+    archive.parent.mkdir()
+    archive.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="sha256"):
+        opus.fetch_archive("tatoeba", tmp_path)
+
+
+def test_a_corpus_download_with_the_pinned_hash_is_used(tmp_path, monkeypatch):
+    content = b"pretend archive"
+    pinned = replace(opus.CORPORA["tatoeba"], sha256=hashlib.sha256(content).hexdigest())
+    monkeypatch.setitem(opus.CORPORA, "tatoeba", pinned)
+    archive = tmp_path / "opus" / pinned.archive_name
+    archive.parent.mkdir()
+    archive.write_bytes(content)
+    assert opus.fetch_archive("tatoeba", tmp_path) == archive
+
+
+def test_licenses_cover_only_the_corpora_present():
+    found = opus.licenses({"opus-tatoeba": 3, "ai-lang-translation": 9})
+    assert list(found) == ["opus-tatoeba"]
+    assert found["opus-tatoeba"]["license"] == "CC BY 2.0 FR"
+    assert "tatoeba.org" in found["opus-tatoeba"]["attribution"]

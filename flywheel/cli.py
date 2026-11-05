@@ -21,7 +21,7 @@ from flywheel.evals import judge as judging
 from flywheel.evals import rating, report
 from flywheel.evals import translate as translating
 from flywheel.evals.config import EvalConfig
-from flywheel.ingest import comparisons, flores, jsonl
+from flywheel.ingest import comparisons, flores, jsonl, opus
 from flywheel.registry.card import render_card as render_model_card
 from flywheel.registry.store import Registry
 from flywheel.schema import CuratedEvent, EvalSegment, FeedbackEvent, HumanRating, ModelRecord
@@ -105,6 +105,25 @@ def ingest_flores(
     segments = flores.load_segments(flores.fetch_archive(cache_dir), src, tgt, split)
     write_jsonl(data_dir / "eval" / f"flores200-{split}-{src}-{tgt}.jsonl", segments)
     typer.echo(f"stored {len(segments)} {split} segments for {src}-{tgt}")
+
+
+@ingest_app.command("opus")
+def ingest_opus(
+    corpus: Annotated[str, typer.Argument(help=f"One of: {', '.join(opus.CORPORA)}.")],
+    src: str = "en",
+    tgt: str = "ceb",
+    data_dir: DataDir = Path("data"),
+    cache_dir: Annotated[Path, typer.Option(help="Where the download is kept.")] = Path(".cache"),
+) -> None:
+    """Download a human-translated OPUS corpus and store its pairs as training events."""
+    if corpus not in opus.CORPORA:
+        raise typer.BadParameter(f"unknown corpus {corpus!r}, expected one of {list(opus.CORPORA)}")
+    result = opus.load_events(opus.fetch_archive(corpus, cache_dir), corpus, src, tgt)
+    for reason, count in sorted(result.skipped.items()):
+        typer.echo(f"skipped {count} ({reason})")
+    spec = opus.CORPORA[corpus]
+    typer.echo(f"{spec.opus_name} {spec.version}, {spec.license}. {spec.attribution}")
+    _store_events(result.events, opus.source_name(corpus), data_dir)
 
 
 @app.command()

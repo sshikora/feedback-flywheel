@@ -155,3 +155,20 @@ def test_the_card_states_the_pre_registered_gate_and_makes_no_claim_untested(reg
     assert "makes no quality claim" in card
     assert "| held as candidate | failed the gate |" in card
     assert DIGEST in card
+
+
+def test_the_card_credits_each_corpus_the_model_learned_from(registry):
+    registry.register(record())
+    dataset = {
+        "counts": {
+            "examples": 2,
+            "events": 2,
+            "origin": {"human_share": 1.0},
+            "sources": {"opus-tatoeba": 2},
+        },
+        "licenses": {"opus-tatoeba": {"license": "CC BY 2.0 FR", "attribution": "By tatoeba.org."}},
+    }
+    card = render_card(
+        registry.get("v1"), RunConfig.from_toml(EXAMPLE), registry.history("v1"), dataset
+    )
+    assert "- **Credit for opus-tatoeba:** CC BY 2.0 FR. By tatoeba.org." in card

@@ -14,7 +14,7 @@
 - **Weights go straight to Modal.** A base model comes from Hugging Face. For a trained model, this machine asks Together for its short-lived storage link and passes only the link, so the Together key never leaves this machine and 19 GB are never uploaded from it. Weights are kept in a Modal volume, so each model is fetched once.
 - **Configs name the host.** A model in an eval config takes `host = "modal"` and `weights = "hf:<repo>"` or `"run:<training run>"`.
 
-**Found during this.** `flywheel train download` saved an empty file and reported success. Together answers with a redirect to its storage host, which the client did not follow. It now follows the redirect, which drops the API key because the host differs, and refuses an empty download.
+**Found during this.** `flywheel train download` saved an empty file and reported success. Together answers with a redirect to its storage host, which the client did not follow. It now follows the redirect, which drops the API key because the host differs, and refuses an empty download. The first real download then stalled at 5.6 GB and failed after 10 minutes with no way to continue. It now resumes from its partial file, and Modal's fetch retries and resumes too.
 
 **Consequences.**
 

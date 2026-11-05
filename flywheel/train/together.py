@@ -98,20 +98,38 @@ class Together:
         """Stream the trained weights to a file and return its size in bytes.
 
         Together answers with a redirect to its storage host. httpx drops the API key
-        when a redirect leaves the origin, so the key never reaches that host.
+        when a redirect leaves the origin, so the key never reaches that host. An
+        interrupted download keeps its partial file, and the next call resumes it.
         """
         destination.parent.mkdir(parents=True, exist_ok=True)
         partial = destination.with_name(destination.name + ".part")
+        offset = partial.stat().st_size if partial.exists() else 0
         params = {"ft_id": job_id, "checkpoint": checkpoint}
-        with self._client.stream(
-            "GET", "/v1/finetune/download", params=params, follow_redirects=True
-        ) as response:
-            if response.is_error:
-                response.read()
-                raise TogetherError(f"download refused: {_error_message(response)}")
-            with partial.open("wb") as file:
-                for chunk in response.iter_bytes():
-                    file.write(chunk)
+        headers = {"Range": f"bytes={offset}-"} if offset else {}
+        try:
+            with self._client.stream(
+                "GET",
+                "/v1/finetune/download",
+                params=params,
+                headers=headers,
+                follow_redirects=True,
+            ) as response:
+                if response.status_code == 416 and offset:
+                    pass  # the partial file already holds every byte
+                elif response.is_error:
+                    response.read()
+                    raise TogetherError(f"download refused: {_error_message(response)}")
+                else:
+                    resumed = response.status_code == 206
+                    with partial.open("ab" if resumed else "wb") as file:
+                        for chunk in response.iter_bytes():
+                            file.write(chunk)
+        except httpx.TransportError as err:
+            got = partial.stat().st_size if partial.exists() else 0
+            raise TogetherError(
+                f"download stopped at {got / 1e9:.1f} GB ({type(err).__name__}). "
+                "Run it again to resume."
+            ) from err
         if partial.stat().st_size == 0:
             partial.unlink()
             raise TogetherError(f"download was empty (HTTP {response.status_code})")

@@ -197,6 +197,11 @@ class FakeTogether:
             return httpx.Response(302, headers={"location": "https://storage.example/weights"})
         if request.url.host == "storage.example":
             assert "authorization" not in request.headers
+            if "range" in request.headers:
+                start = int(request.headers["range"].removeprefix("bytes=").rstrip("-"))
+                if start >= len(b"weights"):
+                    return httpx.Response(416)
+                return httpx.Response(206, content=b"weights"[start:])
             return httpx.Response(200, content=b"weights")
         return httpx.Response(404, json={"error": {"message": f"no route {path}"}})
 
@@ -234,6 +239,25 @@ def test_a_download_lands_whole_or_not_at_all(tmp_path):
     assert FakeTogether().client().download("ft-1", destination) == len(b"weights")
     assert destination.read_bytes() == b"weights"
     assert not (destination.parent / "merged.tar.zst.part").exists()
+
+
+@pytest.mark.parametrize("held", [b"wei", b"weights"])
+def test_a_partial_download_resumes(tmp_path, held):
+    destination = tmp_path / "merged.tar.zst"
+    (tmp_path / "merged.tar.zst.part").write_bytes(held)
+    assert FakeTogether().client().download("ft-1", destination) == len(b"weights")
+    assert destination.read_bytes() == b"weights"
+
+
+def test_a_stalled_download_keeps_its_bytes_and_says_to_rerun(tmp_path):
+    def handle(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("stalled", request=request)
+
+    destination = tmp_path / "merged.tar.zst"
+    (tmp_path / "merged.tar.zst.part").write_bytes(b"wei")
+    with pytest.raises(TogetherError, match="Run it again to resume"):
+        Together("key", httpx.MockTransport(handle)).download("ft-1", destination)
+    assert (tmp_path / "merged.tar.zst.part").read_bytes() == b"wei"
 
 
 def test_an_empty_download_is_refused(tmp_path):

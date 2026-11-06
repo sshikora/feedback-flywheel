@@ -5,6 +5,9 @@ model, or from a short-lived link Together signs for a trained one, so the
 Together key never leaves this machine. The GPU function runs vLLM in batch
 mode and exits, so nothing is left running, and its timeout caps the spend.
 
+The app is deployed and each model's work is one spawned call, so it carries on
+when this machine loses its connection, and a later run collects the result.
+
 Both models in a comparison run here with the same settings, so a difference in
 scores comes from the weights and not from the host.
 """
@@ -19,7 +22,11 @@ import modal
 GPU = "L4"
 GPU_USD_PER_SECOND = 0.000222  # Modal's L4 rate on 2026-11-05, about $0.80 an hour
 TIMEOUT_SECONDS = 1800  # a run stops here, which caps one model at about $0.40 of GPU time
+FETCH_TIMEOUT_SECONDS = 3600
 MAX_MODEL_LEN = 8192
+# The weights take 16.7 GB of the L4's 22 GB. CUDA graphs ran out of memory while
+# being captured, so the model runs eagerly with fewer sentences at a time.
+MAX_NUM_SEQS = 64
 MAX_TOKENS = 4096  # the same stop as OpenRouter requests, for a model that repeats itself
 SEED = 1
 
@@ -55,7 +62,7 @@ class Generation(NamedTuple):
     finish_reason: str | None
 
 
-@app.function(image=fetch_image, volumes={WEIGHTS: volume}, timeout=3600)
+@app.function(image=fetch_image, volumes={WEIGHTS: volume}, timeout=FETCH_TIMEOUT_SECONDS)
 def fetch(key: str, repo: str | None = None, url: str | None = None) -> bool:
     """Put weights in the volume under `key`. Returns False when they were already there."""
     target = Path(WEIGHTS) / key
@@ -91,6 +98,8 @@ def generate(key: str, prompts: list[str]) -> tuple[list[Generation], float]:
     llm = LLM(
         model=f"{WEIGHTS}/{key}",
         max_model_len=MAX_MODEL_LEN,
+        max_num_seqs=MAX_NUM_SEQS,
+        enforce_eager=True,
         language_model_only=True,
         seed=SEED,
     )
@@ -107,3 +116,13 @@ def generate(key: str, prompts: list[str]) -> tuple[list[Generation], float]:
         for result in results
     ]
     return answers, time.monotonic() - started
+
+
+@app.function(image=fetch_image, timeout=FETCH_TIMEOUT_SECONDS + TIMEOUT_SECONDS + 600)
+def evaluate(
+    key: str, prompts: list[str], repo: str | None = None, url: str | None = None
+) -> tuple[list[Generation], float]:
+    """Fetch the weights if needed, then answer every prompt. Runs on a small CPU container."""
+    fetch.remote(key, repo=repo, url=url)
+    answers: tuple[list[Generation], float] = generate.remote(key, prompts)
+    return answers

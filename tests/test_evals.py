@@ -1,6 +1,5 @@
 """The evaluation harness, with fake model clients. No test here spends money."""
 
-import contextlib
 import csv
 import json
 from pathlib import Path
@@ -838,33 +837,75 @@ class TestSelfHosted:
         assert base.weights_key == "hf--Qwen--Qwen3.5-9B"
         assert trained.weights_key == "q-sft-1"
 
+    def test_a_call_starts_with_the_weights_source_and_every_prompt(self, monkeypatch):
+        spawned = []
+
+        class Evaluate:
+            def spawn(self, *args, **kwargs):
+                spawned.append((args, kwargs))
+                return SimpleNamespace(object_id="fc-1")
+
+        monkeypatch.setattr(modal_host.app, "deploy", lambda: None)
+        monkeypatch.setattr(modal_host, "evaluate", Evaluate())
+        trained = ModelSpec(id="flywheel/q", role="base", host="modal", weights="run:q-sft-1")
+        base = ModelSpec(id="modal/q", role="compare", host="modal", weights="hf:Qwen/Qwen3.5-9B")
+        assert (
+            hosted.start_on_modal(trained, make_segments(2), "https://signed.example/w") == "fc-1"
+        )
+        hosted.start_on_modal(base, make_segments(1), None)
+
+        (key, prompts), source = spawned[0]
+        assert key == "q-sft-1"
+        assert len(prompts) == 2
+        assert source == {"url": "https://signed.example/w"}
+        assert spawned[1][0][0] == "hf--Qwen--Qwen3.5-9B"
+        assert spawned[1][1] == {"repo": "Qwen/Qwen3.5-9B"}
+
+    def fake_call(self, monkeypatch, outcome):
+        def get():
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        monkeypatch.setattr(modal.FunctionCall, "from_id", lambda call_id: SimpleNamespace(get=get))
+
     def test_records_split_the_gpu_time_and_keep_empty_answers_as_failures(self, monkeypatch):
-        calls = []
-
-        class Remote:
-            def __init__(self, name, result=None):
-                self.name, self.result = name, result
-
-            def remote(self, *args, **kwargs):
-                calls.append((self.name, args, kwargs))
-                return self.result
-
         answers = [
             modal_host.Generation("Maayong buntag.", "stop"),
             modal_host.Generation("", "stop"),
         ]
-        monkeypatch.setattr(modal_host.app, "run", contextlib.nullcontext)
-        monkeypatch.setattr(modal_host, "fetch", Remote("fetch"))
-        monkeypatch.setattr(modal_host, "generate", Remote("generate", (answers, 100.0)))
+        self.fake_call(monkeypatch, (answers, 100.0))
         spec = ModelSpec(id="flywheel/q", role="base", host="modal", weights="run:q-sft-1")
-        records = hosted.translate_on_modal(spec, make_segments(2), "https://signed.example/w")
-
-        assert calls[0] == ("fetch", ("q-sft-1",), {"url": "https://signed.example/w"})
-        assert calls[1][1][0] == "q-sft-1"
-        assert len(calls[1][1][1]) == 2
+        records = hosted.collect_from_modal("fc-1", spec, make_segments(2))
         assert records[0].output == "Maayong buntag."
         assert records[1].error == "empty answer"
         assert records[0].cost_usd == pytest.approx(50 * modal_host.GPU_USD_PER_SECOND)
+
+    @pytest.mark.parametrize(
+        ("error", "kind"),
+        [
+            (ConnectionResetError("reset"), hosted.StillRunning),
+            (modal.exception.ConnectionError("lost"), hosted.StillRunning),
+            (modal.exception.RemoteError("cancelled"), hosted.HostError),
+            (ValueError("vLLM could not load the model"), hosted.HostError),
+        ],
+    )
+    def test_a_lost_connection_is_told_apart_from_a_failed_call(self, monkeypatch, error, kind):
+        self.fake_call(monkeypatch, error)
+        spec = ModelSpec(id="modal/q", role="compare", host="modal", weights="hf:Qwen/Qwen3.5-9B")
+        with pytest.raises(kind):
+            hosted.collect_from_modal("fc-1", spec, make_segments(1))
+
+    def test_a_modal_refusal_is_one_line(self, monkeypatch):
+        def refuse():
+            raise modal.exception.InvalidError(
+                "Please add a payment method to use L4 GPU functions."
+            )
+
+        monkeypatch.setattr(modal_host.app, "deploy", refuse)
+        spec = ModelSpec(id="modal/q", role="compare", host="modal", weights="hf:Qwen/Qwen3.5-9B")
+        with pytest.raises(hosted.HostError, match="InvalidError: Please add a payment method"):
+            hosted.start_on_modal(spec, make_segments(1), None)
 
     @pytest.fixture
     def hosted_workspace(self, workspace, monkeypatch):
@@ -894,10 +935,21 @@ class TestSelfHosted:
                 }
             )
         )
-        calls = []
+        workspace.started = []
+        workspace.collected = []
+        workspace.collect_error = None
+        segments_of = {}
 
-        def translate_on_modal(spec, segments, url):
-            calls.append((spec.id, len(segments), url))
+        def start_on_modal(spec, segments, url):
+            call_id = f"fc-{len(workspace.started) + 1}"
+            workspace.started.append((spec.id, len(segments), url))
+            segments_of[call_id] = segments
+            return call_id
+
+        def collect_from_modal(call_id, spec, segments):
+            workspace.collected.append((call_id, spec.id, len(segments)))
+            if workspace.collect_error is not None:
+                raise workspace.collect_error
             return [
                 TranslationRecord(
                     segment_id=s.id, model_id=spec.id, output=f"{spec.id} {s.id}", cost_usd=0.001
@@ -909,60 +961,76 @@ class TestSelfHosted:
             def download_url(self, job_id):
                 return f"https://signed.example/{job_id}"
 
-        monkeypatch.setattr(hosted, "translate_on_modal", translate_on_modal)
+        monkeypatch.setattr(hosted, "start_on_modal", start_on_modal)
+        monkeypatch.setattr(hosted, "collect_from_modal", collect_from_modal)
         monkeypatch.setattr(hosted, "worst_case_usd", lambda: 0.4)
         monkeypatch.setattr(cli_module, "_together", FakeTogether)
         monkeypatch.delenv("OPENROUTER_API_KEY")
-        workspace.calls = calls
         return workspace
+
+    def translate(self, ws, *extra):
+        return runner.invoke(
+            app,
+            ["eval", "translate", "--yes", "--config", str(ws.config), "--data-dir", str(ws.data)]
+            + [str(arg) for arg in extra],
+        )
 
     def test_translate_runs_each_model_once_without_an_openrouter_key(self, hosted_workspace):
         ws = hosted_workspace
         common = ("--config", ws.config, "--data-dir", ws.data)
         assert "at most $0.40" in cli("eval", "translate", *common)
-        assert ws.calls == []
+        assert ws.started == []
         output = cli("eval", "translate", "--yes", *common)
-        assert ws.calls == [
+        assert ws.started == [
             ("modal/base", 30, None),
             ("flywheel/trained", 30, "https://signed.example/ft-1"),
         ]
         assert "$0.06 spent in total, 0 failed" in output
         cli("eval", "translate", "--yes", *common)
-        assert len(ws.calls) == 2
+        assert len(ws.started) == 2
         assert ws.completer.calls == []
+        assert json.loads((ws.data / "runs" / "test-run" / "modal-calls.json").read_text()) == {}
 
-    def test_a_modal_refusal_is_one_line(self, monkeypatch):
-        def refuse():
-            raise modal.exception.InvalidError(
-                "Please add a payment method to use L4 GPU functions."
-            )
+    def test_a_lost_connection_is_collected_by_the_next_run(self, hosted_workspace):
+        ws = hosted_workspace
+        ws.collect_error = hosted.StillRunning("ConnectionError: lost")
+        result = self.translate(ws, "--limit", 3)
+        assert result.exit_code == 1
+        assert "carries on there as fc-1" in result.output
+        assert "Traceback" not in result.output
 
-        monkeypatch.setattr(modal_host.app, "run", refuse)
-        spec = ModelSpec(id="modal/q", role="compare", host="modal", weights="hf:Qwen/Qwen3.5-9B")
-        with pytest.raises(hosted.HostError, match="InvalidError: Please add a payment method"):
-            hosted.translate_on_modal(spec, make_segments(1), None)
+        ws.collect_error = None
+        result = self.translate(ws)
+        assert result.exit_code == 0, result.output
+        assert "collecting fc-1" in result.output
+        assert ws.collected[1] == ("fc-1", "modal/base", 3)
+        assert ws.started[1] == ("modal/base", 27, None)
+        records = translate.read_translations(ws.data / "runs" / "test-run" / "translations.jsonl")
+        assert len(records) == 60
+
+    def test_a_failed_call_is_dropped_so_the_next_run_starts_again(self, hosted_workspace):
+        ws = hosted_workspace
+        ws.collect_error = hosted.HostError("RemoteError: cancelled")
+        result = self.translate(ws)
+        assert result.exit_code == 1
+        assert "stopped: Modal said RemoteError: cancelled." in result.output
+        ws.collect_error = None
+        assert self.translate(ws).exit_code == 0
+        assert [call[0] for call in ws.started] == ["modal/base", "modal/base", "flywheel/trained"]
 
     def test_translate_reports_a_modal_refusal(self, hosted_workspace, monkeypatch):
         def refuse(spec, segments, url):
             raise hosted.HostError("InvalidError: Please add a payment method.")
 
-        monkeypatch.setattr(hosted, "translate_on_modal", refuse)
-        ws = hosted_workspace
-        result = runner.invoke(
-            app,
-            ["eval", "translate", "--yes", "--config", str(ws.config), "--data-dir", str(ws.data)],
-        )
+        monkeypatch.setattr(hosted, "start_on_modal", refuse)
+        result = self.translate(hosted_workspace)
         assert result.exit_code == 1
         assert "stopped: Modal said InvalidError: Please add a payment method." in result.output
         assert "Traceback" not in result.output
 
     def test_translate_refuses_a_model_the_budget_cannot_cover(self, hosted_workspace, monkeypatch):
         monkeypatch.setattr(hosted, "worst_case_usd", lambda: 5.0)
-        ws = hosted_workspace
-        result = runner.invoke(
-            app,
-            ["eval", "translate", "--yes", "--config", str(ws.config), "--data-dir", str(ws.data)],
-        )
+        result = self.translate(hosted_workspace)
         assert result.exit_code == 1
         assert "could cost up to $5.00" in result.output
-        assert ws.calls == []
+        assert hosted_workspace.started == []

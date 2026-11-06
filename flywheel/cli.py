@@ -443,7 +443,8 @@ def eval_translate(
 ) -> None:
     """Run every model over the eval set. Reruns fetch only what is missing."""
     settings = EvalConfig.from_toml(config)
-    segments = _load_segments(settings, data_dir)[:limit]
+    every_segment = _load_segments(settings, data_dir)
+    segments = every_segment[:limit]
     path = _run_dir(settings, data_dir) / "translations.jsonl"
     done = translating.read_translations(path)
     models = [model.id for model in settings.models]
@@ -475,41 +476,83 @@ def eval_translate(
     for spec in self_hosted.values():
         todo = [segment for model, segment in work if model == spec.id]
         if todo:
-            spent += _translate_on_modal(spec, todo, path, settings.max_cost_usd - spent, data_dir)
+            left = settings.max_cost_usd - spent
+            spent += _translate_on_modal(spec, todo, every_segment, path, left, data_dir)
     failed = sum(record.output is None for record in translating.read_translations(path).values())
     typer.echo(f"done, ${spent:.2f} spent in total, {failed} failed")
 
 
 def _translate_on_modal(
-    spec: ModelSpec, segments: list[EvalSegment], path: Path, left_usd: float, data_dir: Path
+    spec: ModelSpec,
+    segments: list[EvalSegment],
+    every_segment: list[EvalSegment],
+    path: Path,
+    left_usd: float,
+    data_dir: Path,
 ) -> float:
-    """Run one self-hosted model and return what it cost."""
-    worst = hosted.worst_case_usd()
-    if worst > left_usd:
+    """Run one self-hosted model and return what it cost.
+
+    The call's id is saved before waiting, so after a lost connection the next
+    run collects that call instead of starting and paying for another.
+    """
+    calls_path = path.parent / "modal-calls.json"
+    calls: dict[str, Any] = json.loads(calls_path.read_text()) if calls_path.exists() else {}
+    pending = calls.get(spec.id)
+    rest: list[EvalSegment] = []
+    if pending is not None:
+        by_id = {segment.id: segment for segment in every_segment}
+        rest = [segment for segment in segments if segment.id not in set(pending["segments"])]
+        segments = [by_id[segment_id] for segment_id in pending["segments"]]
+        call_id = str(pending["call_id"])
+        typer.echo(f"{spec.id}: collecting {call_id}, started by an earlier run")
+    else:
+        worst = hosted.worst_case_usd()
+        if worst > left_usd:
+            typer.echo(
+                f"stopped: {spec.id} could cost up to ${worst:.2f}, and ${left_usd:.2f} is left.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        url = None
+        kind, _, name = (spec.weights or "").partition(":")
+        if kind == "run":
+            state_path = training.run_dir(data_dir, name) / "state.json"
+            if not state_path.exists():
+                raise typer.BadParameter(f"no training run named {name}")
+            state = training.TrainingState.load(state_path)
+            if state.status != "completed" or state.job_id is None:
+                raise typer.BadParameter(f"{name} is {state.status}, not completed")
+            with _training_errors():
+                url = _together().download_url(state.job_id)
+        try:
+            call_id = hosted.start_on_modal(spec, segments, url)
+        except hosted.HostError as err:
+            typer.echo(f"stopped: Modal said {err}. Finished work is saved.", err=True)
+            raise typer.Exit(code=1) from err
+        calls[spec.id] = {"call_id": call_id, "segments": [segment.id for segment in segments]}
+        write_json(calls_path, calls)
+        typer.echo(f"{spec.id}: {len(segments)} sentences started on Modal as {call_id}")
+    try:
+        records = hosted.collect_from_modal(call_id, spec, segments)
+    except hosted.StillRunning as err:
         typer.echo(
-            f"stopped: {spec.id} could cost up to ${worst:.2f}, and ${left_usd:.2f} is left.",
+            f"lost contact with Modal ({err}). {spec.id} carries on there as {call_id}. "
+            "Run the same command again to collect it.",
             err=True,
         )
-        raise typer.Exit(code=1)
-    url = None
-    kind, _, name = (spec.weights or "").partition(":")
-    if kind == "run":
-        state_path = training.run_dir(data_dir, name) / "state.json"
-        if not state_path.exists():
-            raise typer.BadParameter(f"no training run named {name}")
-        state = training.TrainingState.load(state_path)
-        if state.status != "completed" or state.job_id is None:
-            raise typer.BadParameter(f"{name} is {state.status}, not completed")
-        with _training_errors():
-            url = _together().download_url(state.job_id)
-    typer.echo(f"{spec.id}: {len(segments)} sentences on Modal")
-    try:
-        records = hosted.translate_on_modal(spec, segments, url)
+        raise typer.Exit(code=1) from err
     except hosted.HostError as err:
+        del calls[spec.id]
+        write_json(calls_path, calls)
         typer.echo(f"stopped: Modal said {err}. Finished work is saved.", err=True)
         raise typer.Exit(code=1) from err
     append_jsonl(path, records)
-    return sum(record.cost_usd for record in records)
+    del calls[spec.id]
+    write_json(calls_path, calls)
+    cost = sum(record.cost_usd for record in records)
+    if rest:
+        cost += _translate_on_modal(spec, rest, every_segment, path, left_usd - cost, data_dir)
+    return cost
 
 
 @eval_app.command("judge")

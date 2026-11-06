@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+import modal
 import numpy as np
 import pytest
 from sacrebleu.metrics.chrf import CHRF
@@ -929,6 +930,31 @@ class TestSelfHosted:
         cli("eval", "translate", "--yes", *common)
         assert len(ws.calls) == 2
         assert ws.completer.calls == []
+
+    def test_a_modal_refusal_is_one_line(self, monkeypatch):
+        def refuse():
+            raise modal.exception.InvalidError(
+                "Please add a payment method to use L4 GPU functions."
+            )
+
+        monkeypatch.setattr(modal_host.app, "run", refuse)
+        spec = ModelSpec(id="modal/q", role="compare", host="modal", weights="hf:Qwen/Qwen3.5-9B")
+        with pytest.raises(hosted.HostError, match="InvalidError: Please add a payment method"):
+            hosted.translate_on_modal(spec, make_segments(1), None)
+
+    def test_translate_reports_a_modal_refusal(self, hosted_workspace, monkeypatch):
+        def refuse(spec, segments, url):
+            raise hosted.HostError("InvalidError: Please add a payment method.")
+
+        monkeypatch.setattr(hosted, "translate_on_modal", refuse)
+        ws = hosted_workspace
+        result = runner.invoke(
+            app,
+            ["eval", "translate", "--yes", "--config", str(ws.config), "--data-dir", str(ws.data)],
+        )
+        assert result.exit_code == 1
+        assert "stopped: Modal said InvalidError: Please add a payment method." in result.output
+        assert "Traceback" not in result.output
 
     def test_translate_refuses_a_model_the_budget_cannot_cover(self, hosted_workspace, monkeypatch):
         monkeypatch.setattr(hosted, "worst_case_usd", lambda: 5.0)

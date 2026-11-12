@@ -206,8 +206,23 @@ def build_report(inputs: EvalInputs) -> dict[str, Any]:
             for i in ranked[:WORST_SENTENCES]
         ]
 
+    judge_pairs = _judge_rows(inputs, segments, outputs)
+    candidate = None
+    if config.purpose == "candidate":
+        tested, against = config.model_ids("base")[0], config.model_ids("compare")[0]
+        gain = metrics.chrf_difference(stats[tested], stats[against], weights)
+        judged = next((p for p in judge_pairs if p["base"] == tested), None)
+        candidate = {
+            "model": tested,
+            "against": against,
+            "chrf_gain": _interval_json(gain),
+            "judge_win_rate": judged["base_win_rate"] if judged else None,
+        }
+
     return {
         "run": config.name,
+        "purpose": config.purpose,
+        "candidate": candidate,
         "eval_set": config.eval_set,
         "sentences": len(segments),
         "sentences_in_set": len(inputs.segments),
@@ -219,7 +234,7 @@ def build_report(inputs: EvalInputs) -> dict[str, Any]:
         "recommended_base": with_headroom[0]["model"] if with_headroom else None,
         "judge": {
             "model": config.judge.model,
-            "pairs": _judge_rows(inputs, segments, outputs),
+            "pairs": judge_pairs,
             "input_tokens": sum(v.input_tokens for v in inputs.verdicts.values()),
             "output_tokens": sum(v.output_tokens for v in inputs.verdicts.values()),
         },
@@ -269,6 +284,33 @@ def _range(interval: Mapping[str, float], digits: int = 2) -> str:
     )
 
 
+def _verdict(interval: Mapping[str, float], tie: float) -> str:
+    if interval["low"] > tie:
+        return "better"
+    if interval["high"] < tie:
+        return "worse"
+    return "a tie"
+
+
+def _candidate_finding(candidate: dict[str, Any]) -> str:
+    gain = candidate["chrf_gain"]
+    against = _text(candidate["against"])
+    lines = [
+        f"{_text(candidate['model'])} against {against}: chrF++ gain {gain['value']:+.2f}, "
+        f"range [{gain['low']:+.2f}, {gain['high']:+.2f}], {_verdict(gain, 0)}."
+    ]
+    rate = candidate["judge_win_rate"]
+    if rate is None:
+        lines.append("The judge has not run yet.")
+    else:
+        lines.append(
+            f"The blind judge preferred it {rate['value']:.0%} of the time, range "
+            f"[{rate['low']:.0%}, {rate['high']:.0%}], {_verdict(rate, 0.5)}."
+        )
+    lines.append("The promotion gate and its thresholds are in the run config.")
+    return " ".join(lines)
+
+
 def _base_finding(report: dict[str, Any]) -> str:
     if report["recommended_base"]:
         return (
@@ -310,9 +352,11 @@ def _human_html(human: dict[str, Any] | None) -> str:
 
 def render_html(report: dict[str, Any]) -> str:
     title = f"Evaluation report: {report['run']}"
+    candidate = report.get("candidate")
+    other = "Base" if candidate else "Best compare"
     parts = [
         f"<h1>{_text(title)}</h1>",
-        f"<p>{_base_finding(report)}</p>",
+        f"<p>{_candidate_finding(candidate) if candidate else _base_finding(report)}</p>",
         f"<p class='note'>{report['sentences']} sentences from {_text(report['eval_set'])}. "
         "Every range is a 95% bootstrap interval. A difference inside its interval is a tie. "
         f"Translation cost ${report['translation_cost_usd']:.2f}.</p>",
@@ -340,25 +384,26 @@ def render_html(report: dict[str, Any]) -> str:
             numeric_from=2,
         )
     )
-    parts.append("<h2>Headroom</h2>")
-    parts.append(
-        f"<p class='note'>Gap to {_text(report['best_compare'])}, the best compare "
-        "model. Training on its answers cannot teach more than it knows.</p>"
-    )
-    parts.append(
-        _table(
-            ["Base model", "chrF++", "Gap", "Headroom"],
-            [
-                [
-                    _text(h["model"]),
-                    f"{h['chrf']:.2f}",
-                    _range(h["gap_to_best_compare"]),
-                    "yes" if h["has_headroom"] else "no",
-                ]
-                for h in report["headroom"]
-            ],
+    if not candidate:
+        parts.append("<h2>Headroom</h2>")
+        parts.append(
+            f"<p class='note'>Gap to {_text(report['best_compare'])}, the best compare "
+            "model. Training on its answers cannot teach more than it knows.</p>"
         )
-    )
+        parts.append(
+            _table(
+                ["Base model", "chrF++", "Gap", "Headroom"],
+                [
+                    [
+                        _text(h["model"]),
+                        f"{h['chrf']:.2f}",
+                        _range(h["gap_to_best_compare"]),
+                        "yes" if h["has_headroom"] else "no",
+                    ]
+                    for h in report["headroom"]
+                ],
+            )
+        )
     parts.append("<h2>Blind judge</h2>")
     judge = report["judge"]
     if judge["pairs"]:
@@ -386,12 +431,12 @@ def render_html(report: dict[str, Any]) -> str:
         parts.append("<p class='note'>The judge has not run yet.</p>")
     parts.append(_human_html(report["human"]))
 
-    parts.append("<h2>Worst sentences against the best compare model</h2>")
+    parts.append(f"<h2>Worst sentences against the {other.lower()} model</h2>")
     for model, sentences in report["worst_sentences"].items():
         parts.append(f"<h3>{_text(model)}</h3>")
         parts.append(
             _table(
-                ["Source", "Reference", "This model", "Best compare", "chrF++"],
+                ["Source", "Reference", "This model", other, "chrF++"],
                 [
                     [
                         _text(s["source"]),

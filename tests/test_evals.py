@@ -592,6 +592,41 @@ class TestReport:
         assert built["recommended_base"] is None
         assert "No candidate base" in report.render_html(built)
 
+    def test_a_candidate_report_shows_its_gain_over_the_model_it_must_beat(self):
+        segments = make_segments(40)
+        config = make_config(purpose="candidate")
+        inputs = make_inputs(
+            segments, lambda s: s.reference, lambda s: s.reference[:8], config=config
+        )
+        built = report.build_report(inputs)
+        assert built["candidate"]["model"] == BASE
+        assert built["candidate"]["against"] == TEACHER
+        assert built["candidate"]["chrf_gain"]["low"] > 0
+        assert built["candidate"]["judge_win_rate"] is None
+        page = report.render_html(built)
+        assert "chrF++ gain +" in page
+        assert "better." in page
+        assert "The judge has not run yet." in page
+        assert "Headroom" not in page
+        assert "Worst sentences against the base model" in page
+
+    def test_a_candidate_within_its_range_is_a_tie(self):
+        segments = make_segments(40)
+        config = make_config(purpose="candidate")
+        built = report.build_report(make_inputs(segments, lambda s: s.reference, config=config))
+        assert "a tie." in report.render_html(built)
+
+    def test_a_candidate_run_meets_exactly_one_model(self):
+        with pytest.raises(ValueError, match="one base model and one compare model"):
+            make_config(
+                purpose="candidate",
+                models=[
+                    {"id": TEACHER, "role": "compare"},
+                    {"id": "google/other", "role": "compare"},
+                    {"id": BASE, "role": "base"},
+                ],
+            )
+
     def test_failures_count_against_a_model(self):
         segments = make_segments(10)
         built = report.build_report(

@@ -38,10 +38,12 @@
 | | Wikinews | Tatoeba |
 |---|---|---|
 | Fit to translate | 263,853 | 2,073,079 |
-| FLORES articles skipped | 201 of 207, the rest are not in the dump under that title | |
+| FLORES articles skipped | 201 of 207. The other 6 are unpublished, so skipped anyway | |
 | Drawn sentences that leaked into FLORES | 0 | 0 |
 | Mean length | 128 characters | 39 characters |
 | Articles drawn from | 4,306 | |
+
+Both checks earn their place. Without skipping articles, about 640 Wikinews sentences match FLORES text, from 196 of its 207 articles. 614 of them are in those articles, and the other 27 are in other articles that repeat the same story, which only the sentence check catches.
 
 Wikinews drops most for unbalanced quotes, 23,050 sentences, nearly all cut from quotations that run over several sentences. Tatoeba drops 63,229 exact duplicates.
 

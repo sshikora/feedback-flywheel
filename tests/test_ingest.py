@@ -1,3 +1,4 @@
+import bz2
 import gzip
 import hashlib
 import io
@@ -7,11 +8,14 @@ import zipfile
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import pytest
 
-from flywheel.ingest import comparisons, flores, jsonl, opus
+from flywheel.curate.leakage import LeakageIndex
+from flywheel.ingest import comparisons, flores, jsonl, opus, sources
 from flywheel.ingest.comparisons import load_comparisons
+from flywheel.schema import SourceText
 from flywheel.storage import write_jsonl
 from tests.factories import make_event
 
@@ -239,3 +243,161 @@ def test_licenses_cover_only_the_corpora_present():
     assert list(found) == ["opus-tatoeba"]
     assert found["opus-tatoeba"]["license"] == "CC BY 2.0 FR"
     assert "tatoeba.org" in found["opus-tatoeba"]["attribution"]
+
+
+def _wikinews_dump(path: Path, pages: list[tuple[str, str, str]]) -> Path:
+    """A dump of (namespace, title, wikitext) pages. A title ending in '->' is a redirect."""
+    body = "".join(
+        f"<page><title>{escape(title.removesuffix('->'))}</title><ns>{namespace}</ns>"
+        f"<id>{index}</id>{'<redirect title="x" />' if title.endswith('->') else ''}"
+        f"<revision><id>9{index}</id><contributor><id>7</id></contributor>"
+        f"<text>{escape(text)}</text></revision></page>"
+        for index, (namespace, title, text) in enumerate(pages, start=1)
+    )
+    xml = f'<mediawiki xmlns="http://www.mediawiki.org/xml/export-0.11/">{body}</mediawiki>'
+    path.write_bytes(bz2.compress(xml.encode()))
+    return path
+
+
+def _tatoeba_text(path: Path, lines: list[str]) -> Path:
+    path.write_bytes(gzip.compress("".join(line + "\n" for line in lines).encode()))
+    return path
+
+
+_ARTICLE = """{{date|May 1, 2026}}
+[[File:Ferry.jpg|thumb|The [[w:Ferry|ferry]] at port]]
+The {{w|Philippine Coast Guard|coast guard}} said the ferry left [[w:Cebu City|Cebu]] at noon. \
+It reached '''Bohol''' two hours later.<ref>Port log</ref>
+{{QuoteLeft|Nobody was hurt.}}
+* A list item that is not prose.
+== Sources ==
+* {{source|url=http://example.com|title=Ferry arrives safely}}
+{{publish}}
+[[Category:Philippines]]
+"""
+
+NO_LEAKS = LeakageIndex([], threshold=0.6)
+
+
+def test_an_article_keeps_its_prose_and_loses_its_markup():
+    assert sources.article_text(_ARTICLE) == (
+        "The coast guard said the ferry left Cebu at noon. It reached Bohol two hours later."
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("It rained. Then it stopped.", ["It rained.", "Then it stopped."]),
+        ('He said "go home." She stayed.', ['He said "go home."', "She stayed."]),
+        ("Mr. Smith met Dr. Cruz at 3 p.m. Monday.", ["Mr. Smith met Dr. Cruz at 3 p.m. Monday."]),
+        ("George W. Bush spoke in the U.S. Senate.", ["George W. Bush spoke in the U.S. Senate."]),
+        ("Is it over? Yes! 2026 was hard.", ["Is it over?", "Yes!", "2026 was hard."]),
+        ("One.\nTwo here.", ["One.", "Two here."]),
+    ],
+)
+def test_sentences_split_at_their_ends_only(text, expected):
+    assert sources.split_sentences(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        ("Hi.", "too short"),
+        ("A" * 300 + ".", "too long"),
+        ("See the page at https://example.com today.", "markup"),
+        ("the start is missing here.", "not a whole sentence"),
+        ("The end is missing here", "not a whole sentence"),
+        ('He said "come back tomorrow.', "unbalanced quotes"),
+        ("The ferry reached Bohol.", None),
+    ],
+)
+def test_a_sentence_unfit_to_translate_says_why(text, reason):
+    assert sources.sentence_problem(text, min_chars=10) == reason
+
+
+def test_only_published_main_articles_outside_flores_are_read(tmp_path):
+    dump = _wikinews_dump(
+        tmp_path / "news.xml.bz2",
+        [
+            ("0", "Ferry arrives safely", _ARTICLE),
+            ("0", "Draft story", "A draft that never passed review."),
+            ("0", "Old title->", "#REDIRECT [[Ferry arrives safely]]"),
+            ("4", "Wikinews:Style guide", "Write in the past tense. {{publish}}"),
+            ("0", "Benchmark story", "This story became part of a benchmark. {{Publish}}"),
+        ],
+    )
+    result = sources.load("wikinews", dump, 10, "s", NO_LEAKS, ["Benchmark story"])
+    assert {(t.id, t.document, t.text) for t in result.texts} == {
+        (
+            "wikinews:20261101:1:0",
+            "Ferry arrives safely",
+            "The coast guard said the ferry left Cebu at noon.",
+        ),
+        ("wikinews:20261101:1:1", "Ferry arrives safely", "It reached Bohol two hours later."),
+    }
+    assert result.skipped == {"unpublished articles": 1, "FLORES articles": 1}
+
+
+def test_a_draw_ignores_file_order_and_grows_without_changing(tmp_path):
+    lines = [f"Sentence number {n} is here." for n in range(50)]
+    forward = _tatoeba_text(tmp_path / "a.gz", lines)
+    backward = _tatoeba_text(tmp_path / "b.gz", lines[::-1])
+
+    def draw(path: Path, size: int, seed: str = "s") -> list[str]:
+        return [t.text for t in sources.load("tatoeba", path, size, seed, NO_LEAKS).texts]
+
+    assert draw(forward, 10) == draw(backward, 10)
+    assert draw(forward, 20)[:10] == draw(forward, 10)
+    assert draw(forward, 10, seed="other") != draw(forward, 10)
+
+
+def test_a_draw_skips_leaks_and_duplicates_and_caps_each_article(tmp_path):
+    flores_text = "The river is high after the rain."
+    lines = [flores_text, "Thank you for the dinner.", "Thank you for the dinner!"]
+    path = _tatoeba_text(tmp_path / "t.gz", lines)
+    result = sources.load("tatoeba", path, 10, "s", LeakageIndex([flores_text], 0.6))
+    assert [t.text for t in result.texts] == ["Thank you for the dinner."]
+    assert result.skipped == {"duplicate": 1, "leaks into FLORES": 1}
+    assert result.available == 2
+
+    article = "{{publish}}\n" + " ".join(f"Reporters confirmed fact number {n}." for n in range(5))
+    dump = _wikinews_dump(tmp_path / "n.xml.bz2", [("0", "Many facts", article)])
+    drawn = sources.load("wikinews", dump, 10, "s", NO_LEAKS).texts
+    assert len(drawn) == sources.MAX_PER_ARTICLE
+
+
+def test_a_tatoeba_line_becomes_a_source_text(tmp_path):
+    path = _tatoeba_text(tmp_path / "t.gz", ["I woke up at five."])
+    (text,) = sources.load("tatoeba", path, 1, "s", NO_LEAKS).texts
+    assert text == SourceText(
+        id="tatoeba:v2026-07-08:en:0", corpus="tatoeba", document=None, text="I woke up at five."
+    )
+
+
+def test_flores_links_name_wikinews_titles():
+    assert sources.wikinews_title(
+        "https://en.wikinews.org/wiki/Fighter_jet_crashes_during_Children%27s_Day_airshow"
+    ) == ("Fighter jet crashes during Children's Day airshow")
+    assert sources.wikinews_title("https://en.wikivoyage.org/wiki/Cebu") is None
+
+
+def test_flores_source_urls_come_from_both_metadata_files(tmp_path):
+    archive = tmp_path / "flores.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        for split, url in (("dev", "https://a.example/1"), ("devtest", "https://b.example/2")):
+            data = f"URL\tdomain\n{url}\twikinews\n{url}\twikinews\n".encode()
+            info = tarfile.TarInfo(f"./flores200_dataset/metadata_{split}.tsv")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    assert flores.source_urls(archive) == {"https://a.example/1", "https://b.example/2"}
+
+
+def test_a_source_download_with_the_wrong_hash_is_refused(tmp_path):
+    archive = tmp_path / "sources" / sources.SOURCES["tatoeba"].archive_name
+    archive.parent.mkdir()
+    archive.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="sha256"):
+        sources.fetch_archive("tatoeba", tmp_path)
+    with pytest.raises(ValueError, match="unknown source"):
+        sources.fetch_archive("wikipedia", tmp_path)

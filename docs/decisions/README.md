@@ -20,3 +20,4 @@ One short file per decision, so a reader can see the reasoning as well as the ou
 | [0014](0014-training-on-together.md) | Training on Together | Accepted |
 | [0015](0015-public-parallel-text.md) | Public parallel text for the first training data | Accepted |
 | [0016](0016-offline-eval-on-modal.md) | Evaluate trained models on Modal; first result a tie | Accepted |
+| [0017](0017-synthetic-teacher-pairs.md) | Synthetic pairs: DeepSeek teaches, from Wikinews and Tatoeba text | Accepted |

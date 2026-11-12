@@ -14,6 +14,7 @@ import anthropic
 import typer
 
 from flywheel.curate.config import CurationConfig
+from flywheel.curate.leakage import LeakageIndex, segment_texts
 from flywheel.curate.pipeline import curate as run_curation
 from flywheel.datasets import builders, snapshot
 from flywheel.datasets.config import DatasetConfig
@@ -21,7 +22,7 @@ from flywheel.evals import hosted, rating, report
 from flywheel.evals import judge as judging
 from flywheel.evals import translate as translating
 from flywheel.evals.config import EvalConfig, ModelSpec
-from flywheel.ingest import comparisons, flores, jsonl, opus
+from flywheel.ingest import comparisons, flores, jsonl, opus, sources
 from flywheel.registry.card import render_card as render_model_card
 from flywheel.registry.store import Registry
 from flywheel.schema import CuratedEvent, EvalSegment, FeedbackEvent, HumanRating, ModelRecord
@@ -124,6 +125,42 @@ def ingest_opus(
     spec = opus.CORPORA[corpus]
     typer.echo(f"{spec.opus_name} {spec.version}, {spec.license}. {spec.attribution}")
     _store_events(result.events, opus.source_name(corpus), data_dir)
+
+
+@ingest_app.command("source")
+def ingest_source(
+    name: Annotated[str, typer.Argument(help=f"One of: {', '.join(sources.SOURCES)}.")],
+    size: Annotated[int, typer.Option(min=1, help="How many sentences to draw.")] = 5000,
+    seed: str = "flywheel-v1",
+    data_dir: DataDir = Path("data"),
+    cache_dir: Annotated[Path, typer.Option(help="Where the download is kept.")] = Path(".cache"),
+) -> None:
+    """Download English text and store a sample for a teacher to translate."""
+    if name not in sources.SOURCES:
+        raise typer.BadParameter(
+            f"unknown source {name!r}, expected one of {list(sources.SOURCES)}"
+        )
+    archive = flores.fetch_archive(cache_dir)
+    segments = [
+        segment
+        for split in flores.SPLITS
+        for segment in flores.load_segments(archive, "en", "ceb", split)
+    ]
+    titles = [t for url in flores.source_urls(archive) if (t := sources.wikinews_title(url))]
+    result = sources.load(
+        name,
+        sources.fetch_archive(name, cache_dir),
+        size,
+        seed,
+        LeakageIndex(segment_texts(segments), CurationConfig().near_dup_threshold),
+        exclude_documents=titles,
+    )
+    for reason, count in sorted(result.skipped.items()):
+        typer.echo(f"skipped {count} ({reason})")
+    spec = sources.SOURCES[name]
+    typer.echo(f"{spec.license}. {spec.attribution}")
+    write_jsonl(data_dir / "sources" / f"{name}.jsonl", result.texts)
+    typer.echo(f"stored {len(result.texts)} of {result.available} sentences")
 
 
 @app.command()

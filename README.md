@@ -49,6 +49,7 @@ uv sync
 uv run flywheel ingest flores --src en --tgt ceb --split devtest
 uv run flywheel ingest flores --src en --tgt ceb --split dev
 uv run flywheel ingest opus tatoeba    # and translatewiki, bible-uedin
+uv run flywheel ingest source wikinews # English for a teacher to translate; and tatoeba
 uv run flywheel ingest comparisons tests/fixtures/comparisons_scan.json --training-from 2026-10-27
 uv run flywheel curate
 uv run flywheel build sft    # and `build dpo`

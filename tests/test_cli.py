@@ -1,5 +1,6 @@
 """End to end through the command line, with fixture data only."""
 
+import gzip
 import json
 import re
 import tarfile
@@ -11,8 +12,8 @@ import pytest
 from typer.testing import CliRunner
 
 from flywheel.cli import app
-from flywheel.ingest import flores, opus
-from flywheel.schema import CuratedEvent, EvalSegment
+from flywheel.ingest import flores, opus, sources
+from flywheel.schema import CuratedEvent, EvalSegment, SourceText
 from flywheel.storage import read_jsonl, write_jsonl
 from tests.factories import make_event
 
@@ -180,3 +181,35 @@ def test_an_unknown_corpus_is_refused(tmp_path):
     assert "unknown corpus 'wikimedia'" in fail(
         "ingest", "opus", "wikimedia", "--data-dir", tmp_path
     )
+
+
+def test_ingest_english_source_text(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    (cache / "sources").mkdir(parents=True)
+    with tarfile.open(cache / flores.ARCHIVE_NAME, "w:gz") as tar:
+        for path, body in (
+            ("dev/eng_Latn.dev", "The river is high after the rain.\n"),
+            ("dev/ceb_Latn.dev", "Taas ang suba human sa ulan.\n"),
+            ("devtest/eng_Latn.devtest", "Thank you very much for dinner.\n"),
+            ("devtest/ceb_Latn.devtest", "Salamat kaayo sa panihapon.\n"),
+            ("metadata_dev.tsv", "URL\tdomain\nhttps://en.wikinews.org/wiki/Rain\twikinews\n"),
+            ("metadata_devtest.tsv", "URL\tdomain\nhttps://example.org/dinner\twikibooks\n"),
+        ):
+            info = tarfile.TarInfo(f"./flores200_dataset/{path}")
+            info.size = len(body.encode())
+            tar.addfile(info, BytesIO(body.encode()))
+    lines = ["Thank you very much for dinner!", "I woke up at five.", "Ok."]
+    archive = cache / "sources" / sources.SOURCES["tatoeba"].archive_name
+    archive.write_bytes(gzip.compress("".join(line + "\n" for line in lines).encode()))
+    monkeypatch.setattr(flores, "_verify", lambda _archive: None)
+    monkeypatch.setattr(sources, "_verify", lambda _archive, _spec: None)
+    data = tmp_path / "data"
+
+    output = run("ingest", "source", "tatoeba", "--data-dir", data, "--cache-dir", cache)
+    assert "skipped 1 (leaks into FLORES)" in output
+    assert "skipped 1 (too short)" in output
+    assert "CC BY 2.0 FR" in output
+    assert "stored 1 of 2 sentences" in output
+    (text,) = read_jsonl(data / "sources" / "tatoeba.jsonl", SourceText)
+    assert text.text == "I woke up at five."
+    assert "unknown source 'wikipedia'" in fail("ingest", "source", "wikipedia")

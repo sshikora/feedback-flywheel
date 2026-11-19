@@ -22,13 +22,21 @@ from flywheel.evals import hosted, rating, report
 from flywheel.evals import judge as judging
 from flywheel.evals import translate as translating
 from flywheel.evals.config import EvalConfig, ModelSpec
-from flywheel.ingest import comparisons, flores, jsonl, opus, sources
+from flywheel.ingest import comparisons, flores, jsonl, opus, sources, teacher
 from flywheel.registry.card import render_card as render_model_card
 from flywheel.registry.store import Registry
-from flywheel.schema import CuratedEvent, EvalSegment, FeedbackEvent, HumanRating, ModelRecord
+from flywheel.schema import (
+    CuratedEvent,
+    EvalSegment,
+    FeedbackEvent,
+    HumanRating,
+    ModelRecord,
+    SourceText,
+)
 from flywheel.schema.export import stale_schemas, write_schemas
 from flywheel.scrub import scrub_events
 from flywheel.storage import append_jsonl, read_jsonl, write_json, write_jsonl
+from flywheel.text import normalize_text
 from flywheel.train import run as training
 from flywheel.train.config import RunConfig, config_hash
 from flywheel.train.together import Together, TogetherError
@@ -161,6 +169,65 @@ def ingest_source(
     typer.echo(f"{spec.license}. {spec.attribution}")
     write_jsonl(data_dir / "sources" / f"{name}.jsonl", result.texts)
     typer.echo(f"stored {len(result.texts)} of {result.available} sentences")
+
+
+@ingest_app.command("teacher")
+def ingest_teacher(
+    name: Annotated[str, typer.Argument(help=f"One of: {', '.join(sources.SOURCES)}.")],
+    max_cost_usd: Annotated[float, typer.Option(min=0, help="Stop spending past this.")] = 1.0,
+    yes: Confirm = False,
+    data_dir: DataDir = Path("data"),
+) -> None:
+    """Translate stored source text with the teacher, and store it as synthetic events."""
+    source_path = data_dir / "sources" / f"{name}.jsonl"
+    if not source_path.exists():
+        raise typer.BadParameter(f"{source_path} is missing. Run `flywheel ingest source {name}`.")
+    human = {
+        normalize_text(event.input.text)
+        for path in sorted((data_dir / "events").glob("*.jsonl"))
+        for event in read_jsonl(path, FeedbackEvent)
+        if event.origin == "human"
+    }
+    loaded = read_jsonl(source_path, SourceText)
+    texts = [text for text in loaded if normalize_text(text.text) not in human]
+    if len(texts) < len(loaded):
+        typer.echo(f"skipped {len(loaded) - len(texts)} (already has a human translation)")
+    path = data_dir / "teacher" / f"{name}.jsonl"
+    done = translating.read_translations(path)
+    work = [
+        (teacher.TEACHER, text)
+        for text in texts
+        if (found := done.get((teacher.TEACHER, text.id))) is None or found.output is None
+    ]
+    spent = sum(record.cost_usd for record in done.values())
+    estimate = teacher.estimate_usd(text for _, text in work)
+    typer.echo(
+        f"{len(work)} sentences for {teacher.TEACHER_NAME}, at most about ${estimate:.2f}. "
+        f"${spent:.2f} spent so far, limit ${max_cost_usd:.2f}"
+    )
+    if not yes:
+        typer.echo("Nothing was sent. Pass --yes to run this.")
+        return
+    if work:
+        if estimate > max_cost_usd - spent:
+            typer.echo(f"stopped: this could cost ${estimate:.2f}, over the limit.", err=True)
+            raise typer.Exit(code=1)
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            typer.echo("OPENROUTER_API_KEY is not set.", err=True)
+            raise typer.Exit(code=1)
+        completer = translating.OpenRouter(api_key, routing=teacher.ROUTING)
+        try:
+            spent = translating.complete_all(
+                work, teacher.prompt, completer, path, max_cost_usd, spent
+            )
+        except (translating.BudgetExceeded, translating.RequestRejected) as err:
+            typer.echo(f"stopped: {err}. Finished work is saved.", err=True)
+            raise typer.Exit(code=1) from err
+    records = translating.read_translations(path)
+    failed = sum(record.output is None for record in records.values())
+    typer.echo(f"${spent:.2f} spent in total, {failed} failed. Run again to retry failures.")
+    _store_events(teacher.to_events(texts, records), teacher.source_name(name), data_dir)
 
 
 @app.command()

@@ -1,7 +1,8 @@
 """The feedback event: one record type for all sources.
 
 `signal` is a union on `kind`. A preference is a vote. A reference is a human
-translation from a public corpus, where nobody voted. Correction and implicit
+translation from a public corpus, where nobody voted. A teacher answer is a
+model's translation of public text, made to train on. Correction and implicit
 signals join the union once a source actually produces them.
 """
 
@@ -61,7 +62,16 @@ class ReferenceSignal(Record):
     )
 
 
-Signal = Annotated[PreferenceSignal | ReferenceSignal, Field(discriminator="kind")]
+class TeacherSignal(Record):
+    """A teacher model's translation of public text. Its one candidate is that answer."""
+
+    kind: Literal["teacher"] = "teacher"
+    chosen: list[str] = Field(
+        min_length=1, max_length=1, description="The model id of the teacher."
+    )
+
+
+Signal = Annotated[PreferenceSignal | ReferenceSignal | TeacherSignal, Field(discriminator="kind")]
 
 
 class EventContext(Record):

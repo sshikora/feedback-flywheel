@@ -1,6 +1,6 @@
 # 0017: Synthetic pairs: the teacher and the English text
 
-**Status:** Accepted, 2026-11-12. Source text is loaded. Teacher translation comes next, after its cost is confirmed.
+**Status:** Accepted, 2026-11-12. Source text is loaded. Updated 2026-11-19: the teacher step is built.
 
 **Context.** The first trained model tied with its base, as expected from 1,781 corpus pairs (`0016`). The volume has to come from synthetic pairs, plan step 3, which needs two things: a teacher model whose terms allow training on its output, and English text we may use. `0011` left open whether answers written by Gemini may train.
 
@@ -47,7 +47,17 @@ Both checks earn their place. Without skipping articles, about 640 Wikinews sent
 
 Wikinews drops most for unbalanced quotes, 23,050 sentences, nearly all cut from quotations that run over several sentences. Tatoeba drops 63,229 exact duplicates.
 
-**Consequences.** The next step translates the 10,000 sentences with DeepSeek, stored as synthetic events. The event schema needs a signal kind for a teacher's answer, because `reference` means a human translation. Curation's spam and leak checks then apply as for any event, and a native speaker should read a sample before training. Every data card already shows the human and synthetic share.
+**The teacher step, 2026-11-19.**
+
+- **`flywheel ingest teacher <source>` translates a stored draw.** Without `--yes` it only prints an upper bound on the cost, at DeepSeek's peak rate. Off-peak hours cost half. It refuses to start a run whose bound passes `--max-cost-usd`.
+- **Requests go to DeepSeek's own API only.** OpenRouter is told to use the `deepseek` provider with no fallback, so no other host's terms apply. The app's zero-retention routing is dropped for this command only, because the text is public.
+- **The prompt is the app's,** with English named as the source, so the model learns from what the app sends.
+- **Answers are stored as they arrive.** A rerun asks only for what is missing or failed.
+- **An answer becomes a synthetic event** with a new signal kind, `teacher`, because `reference` means a human translation. It is not a vote, so vote statistics leave it out. Curation's spam, dedupe and leak checks apply to it as to any event.
+- **A sentence that already has a human translation is skipped,** so the teacher never competes with a person. Two Tatoeba sentences in the first draw are skipped.
+- **Data cards credit both sides.** Each teacher source lists the source text's licence and attribution, and names the teacher.
+
+**Consequences.** Translating both draws costs at most about $0.53. A native speaker should read a sample of the answers before training. Every data card already shows the human and synthetic share.
 
 Tatoeba's English has a house style: 26% of the draw names Tom or Mary, and 7% uses one contributor's recurring names, such as Yanni and Ziri. Names pass through translation, so this skews little, but the share is worth capping if Tatoeba grows.
 

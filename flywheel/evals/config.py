@@ -58,6 +58,13 @@ class RatingSettings(Settings):
 
 class EvalConfig(Settings):
     name: str = Field(pattern=r"^[a-z0-9-]+$")
+    purpose: Literal["baseline", "candidate"] = Field(
+        default="baseline",
+        description=(
+            "baseline ranks base models by headroom. candidate scores one trained model, "
+            "role base, against the one model it must beat, role compare."
+        ),
+    )
     eval_set: str = Field(description="A file in data/eval, without its extension.")
     models: list[ModelSpec] = Field(min_length=2)
     judge: JudgeSettings = JudgeSettings()
@@ -80,6 +87,12 @@ class EvalConfig(Settings):
     def _both_roles_present(self) -> Self:
         if {m.role for m in self.models} != {"compare", "base"}:
             raise ValueError("a run needs at least one compare model and one base model")
+        return self
+
+    @model_validator(mode="after")
+    def _a_candidate_meets_one_model(self) -> Self:
+        if self.purpose == "candidate" and len(self.models) != 2:
+            raise ValueError("a candidate run has one base model and one compare model")
         return self
 
     def model_ids(self, role: Literal["compare", "base"]) -> list[str]:

@@ -3,6 +3,7 @@
 # configs/runs/qwen3.5-9b-sft-opus-1.toml for the run and its gate.
 
 name = "sft-opus-1-vs-base"
+purpose = "candidate"         # one trained model against the model it must beat
 eval_set = "flores200-devtest-en-ceb"
 resamples = 2000
 seed = "flywheel-v1"

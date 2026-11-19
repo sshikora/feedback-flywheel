@@ -132,3 +132,12 @@ class EvalSegment(Record):
     tgt_lang: str
     source: str
     reference: str
+
+
+class SourceText(Record):
+    """An English sentence for a teacher model to translate. Not yet a training pair."""
+
+    id: str
+    corpus: str
+    document: str | None = Field(description="The article it came from, for credit.")
+    text: str = Field(min_length=1)

@@ -72,3 +72,16 @@ def _read_lines(tar: tarfile.TarFile, code: str, split: str) -> list[str]:
     if member is None:
         raise ValueError(f"{code}.{split} is not a regular file")
     return member.read().decode("utf-8").splitlines()
+
+
+def source_urls(archive: Path) -> set[str]:
+    """The web page behind every sentence in every split, from the FLORES metadata."""
+    urls: set[str] = set()
+    with tarfile.open(archive, "r:gz") as tar:
+        for split in SPLITS:
+            member = tar.extractfile(f"./flores200_dataset/metadata_{split}.tsv")
+            if member is None:
+                raise ValueError(f"metadata_{split}.tsv is not a regular file")
+            rows = member.read().decode("utf-8").splitlines()[1:]
+            urls.update(row.split("\t", 1)[0] for row in rows if row)
+    return urls

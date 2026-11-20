@@ -1,6 +1,6 @@
 # 0011: Base model checks for export, license and GPU fit
 
-**Status:** Checks done, 2026-11-02. The base model is still chosen at M2, after the first human round. Changes the GPU tier in `0005`.
+**Status:** Checks done, 2026-11-02. Qwen3.5 9B confirmed by the first human round, 2026-11-20. Changes the GPU tier in `0005`.
 
 **Context.** The M2 baseline ranked three candidate base models. Before one is chosen, the plan requires three checks: the trained adapter can be exported, the license allows self-hosting, and the model fits the cheapest GPU tier. These checks are free and need no training run.
 
@@ -34,6 +34,16 @@ The Llama naming rule conflicts with the planned name, AI Translate Cebuano.
 - **Qwen3.5 9B now leads.** It fits the L4 unquantized, is licensed Apache 2.0, and has clear headroom: 45.74 chrF++ against 61.70 for the best compare model, and 0 to 2% judge wins. Gemma 4 26B A4B scored 59.54 and won 49% against DeepSeek and 53% against Gemma 4 31B, so it leaves little room for distillation, and it fits the L4 only at 4-bit.
 - **Llama 3.1 8B is the reserve.** It passes all three checks, but it scored lowest, had 18 runaway answers, and would need a name beginning with "Llama".
 - **The human round still decides.** Round m2-a scores Gemini 3.8 Flash, Gemma 4 26B A4B and Qwen3.5 9B. If the raters find Qwen3.5 9B much better or worse than its chrF++ suggests, that changes the choice.
+
+**Human round m2-a, 2026-11-20.** A native speaker scored 100 FLORES devtest sentences from each model, from 1 to 5, without knowing which model wrote which. All 10 hidden checks passed.
+
+| Model | Adequacy, 95% range | Fluency, 95% range |
+|---|---|---|
+| Gemini 3.8 Flash | 4.68 (4.54 to 4.80) | 4.69 (4.56 to 4.81) |
+| Gemma 4 26B A4B | 4.64 (4.51 to 4.77) | 4.67 (4.54 to 4.78) |
+| Qwen3.5 9B | 2.98 (2.76 to 3.19) | 3.26 (3.07 to 3.45) |
+
+The speaker finds Qwen3.5 9B as far behind as chrF++ does, so **Qwen3.5 9B is the base model.** Gemma 4 26B A4B rates the same as Gemini, which confirms it has little to learn from the app's models. Round m2-b repeats the sentences in a new order to measure the speaker's consistency.
 
 **Found during these checks.** Google's Gemini API terms say "You may not use the Services to develop models that compete with the Services." Training on votes where the chosen answer came from Gemini could fall under that clause. This is a training data question, not a base model one, and it is settled at M3, before the first upload. One option is to drop Gemini-written answers from training targets and keep them for evaluation. Gemma 4 31B is Apache 2.0, and DeepSeek's terms were not checked.
 

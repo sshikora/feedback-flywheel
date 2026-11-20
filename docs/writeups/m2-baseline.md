@@ -1,7 +1,5 @@
 # How far behind are small open models at English to Cebuano?
 
-*Draft. The native-speaker results are still to come.*
-
 Feedback Flywheel turns human feedback on translations into fine-tuned models, and checks each new model against what it replaces before it ships. Before training anything, it has to answer one question: is there anything to learn? A small model that already matches the large ones has nothing to gain from distillation, and the promotion gate could never pass. This baseline measures that gap for English to Cebuano.
 
 ## Setup
@@ -72,11 +70,25 @@ chrF++ rewards matching the reference's characters, not being right. On the sent
 | Gemini 3.8 Flash | Tan-awa ang marka alang sa piho nga mga panudlo sa first aid alang nianang piho nga hilo. |
 | Gemma 4 26B A4B | Tan-awa ang label para sa espesipikong mga instruksyon sa first aid para sa maong hilo. |
 
-Gemma's answer uses English and Spanish loanwords ("label", "espesipikong", "instruksyon") where the reference uses Cebuano ones. Whether a reader finds it worse, or just more casual, is a question for a native speaker, and the metric cannot answer it.
+Gemma's answer uses English and Spanish loanwords ("label", "espesipikong", "instruksyon") where the reference uses Cebuano ones. Whether a reader finds it worse, or just more casual, the metric cannot say. This sentence was not in the native speaker's sample, but across the 100 that were, the speaker rated Gemma 4 26B A4B as highly as Gemini 3.8 Flash, despite its 2-point chrF++ gap.
 
 ## Native-speaker scores
 
-> **To come.** A native Cebuano speaker is scoring 100 sentences from Gemini 3.8 Flash, Gemma 4 26B A4B and Qwen3.5 9B. The sheet hides which model wrote each translation, and 10 hidden checks screen for careless rating. Adequacy and fluency are scored from 1 to 5, and a second round a few weeks later measures consistency.
+A native Cebuano speaker scored 100 sentences from each of Gemini 3.8 Flash, Gemma 4 26B A4B and Qwen3.5 9B, from 1 to 5 for adequacy (is the meaning right?) and fluency (does it read naturally?). The sheet hid which model wrote each translation and mixed the 300 answers with 10 hidden checks.
+
+| Model | Adequacy, 95% CI | Fluency, 95% CI | Adequacy of 4 or 5 |
+|---|---|---|---|
+| Gemini 3.8 Flash | 4.68 [4.54, 4.80] | 4.69 [4.56, 4.81] | 91% |
+| Gemma 4 26B A4B | 4.64 [4.51, 4.77] | 4.67 [4.54, 4.78] | 92% |
+| Qwen3.5 9B | 2.98 [2.76, 3.19] | 3.26 [3.07, 3.45] | 34% |
+
+The hidden checks passed. The five human references scored 4 or 5 for adequacy, and the five references paired with the wrong English sentence all scored 1.
+
+The speaker agrees with chrF++ and the judge on the order, and on Qwen3.5 9B's gap: 40 of its 100 answers scored 1 or 2 for adequacy. Where they part is at the top. The judge preferred Gemini 3.8 Flash to Gemma 4 26B A4B on about three sentences in four, but the speaker gave the two the same adequacy score on 68 of 100 sentences, scored Gemma higher on 14 and Gemini higher on 18. A forced choice turns small differences into wins, and to this reader those differences were small.
+
+So the base model choice stands. Qwen3.5 9B's gap is one a reader sees, not an artifact of the metric, and Gemma 4 26B A4B has little left to learn from the app's models.
+
+These are one person's scores from one sitting. A second round, with the same sentences in a new order a few weeks later, will measure how consistent they are.
 
 ## Limits
 

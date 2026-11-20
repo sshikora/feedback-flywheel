@@ -1,7 +1,7 @@
 # Feedback Flywheel: Project Plan
 
-**Status:** M0 and M1 built. The M2 baseline is measured and the base model checks are done (see `docs/decisions/0011`). The first native-speaker round is under way. M3's dataset builders, registry and Together training are built, public corpora are loaded (see `docs/decisions/0015`), and the first model is trained and evaluated: a tie with its base, as expected from 1,781 corpus pairs (see `docs/decisions/0016`). Synthetic pairs come next: DeepSeek V4.1 Flash will translate public English text (see `docs/decisions/0017`). Live serving is decided, subject to a cold-start test at M4 (see `docs/decisions/0005`). A native-speaker rater app is added at M4 (see `docs/decisions/0007`). The loop keeps running after launch (see `docs/decisions/0008`).
-**Last updated:** 2026-11-12
+**Status:** M0 and M1 built. The M2 baseline is measured and the base model checks are done (see `docs/decisions/0011`). The first native-speaker round confirmed Qwen3.5 9B as the base model, and a second round will measure the speaker's consistency. M3's dataset builders, registry and Together training are built, public corpora are loaded (see `docs/decisions/0015`), and the first model is trained and evaluated: a tie with its base, as expected from 1,781 corpus pairs (see `docs/decisions/0016`). Synthetic pairs come next: DeepSeek V4.1 Flash will translate public English text (see `docs/decisions/0017`). Live serving is decided, subject to a cold-start test at M4 (see `docs/decisions/0005`). A native-speaker rater app is added at M4 (see `docs/decisions/0007`). The loop keeps running after launch (see `docs/decisions/0008`).
+**Last updated:** 2026-11-20
 **Owner:** seth
 **Related:** `~/source/ai-lang-translation/docs/plans/community-trained-model.md` (product strategy for the in-app side), `~/source/ai-lang-translation/docs/plans/compare-and-vote.md` (the vote data this project consumes)
 

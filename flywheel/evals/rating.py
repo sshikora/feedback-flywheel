@@ -6,18 +6,21 @@ the scores back to the models. The M4 rater app produces the same HumanRating re
 
 Hidden checks catch careless scoring: a reference should score well, and a reference
 for a different sentence should score badly.
+
+`build_sample_rows` makes the same kind of sheet from training pairs instead of an
+eval set, so a speaker can check synthetic pairs before they train.
 """
 
 import csv
 import hashlib
 import io
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Literal, NamedTuple
 
 from flywheel.evals.judge import choose_segments
-from flywheel.schema import EvalSegment, HumanRating
+from flywheel.schema import EvalSegment, FeedbackEvent, HumanRating
 
 HEADER = ["row", "source", "translation", "adequacy", "fluency"]
 REFERENCE_CHECK = "check:reference"
@@ -72,6 +75,49 @@ def build_rows(
         other = chosen[(index + 1) % len(chosen)]
         rows.append(make(segment, other.reference, MISMATCH_CHECK, "wrong"))
     return sorted(rows, key=lambda r: _digest(settings_seed, round_name, "order", r.row))
+
+
+def build_sample_rows(
+    events: Sequence[FeedbackEvent],
+    good: Sequence[FeedbackEvent],
+    seed: str,
+    round_name: str,
+    size: int,
+    checks: int,
+) -> list[SheetRow]:
+    """Rows for a check of training pairs, shuffled.
+
+    `events` are the pairs to check, with an even share drawn from each source. The
+    good checks are pairs from `good`, such as human corpus pairs. The wrong checks put
+    one sampled answer under another sampled sentence.
+    """
+
+    def ranked(pool: Iterable[FeedbackEvent]) -> list[FeedbackEvent]:
+        return sorted(pool, key=lambda event: _digest(seed, event.id))
+
+    by_source: dict[str, list[FeedbackEvent]] = defaultdict(list)
+    for event in events:
+        by_source[event.source].append(event)
+    share = size // len(by_source) if by_source else 0
+    chosen = [event for name in sorted(by_source) for event in ranked(by_source[name])[:share]]
+
+    def make(
+        event: FeedbackEvent,
+        translation: str,
+        model: str,
+        check: Literal["good", "wrong"] | None,
+    ) -> SheetRow:
+        row = _digest(seed, round_name, event.id, model)[:10]
+        return SheetRow(row, event.input.text, translation, event.id, model, check)
+
+    rows = [make(event, event.chosen_output, event.signal.chosen[0], None) for event in chosen]
+    for event in ranked(good)[:checks]:
+        rows.append(make(event, event.chosen_output, REFERENCE_CHECK, "good"))
+    mixed = ranked(chosen)
+    for index, event in enumerate(mixed[:checks]):
+        other = mixed[(index + 1) % len(mixed)]
+        rows.append(make(event, other.chosen_output, MISMATCH_CHECK, "wrong"))
+    return sorted(rows, key=lambda r: _digest(seed, round_name, "order", r.row))
 
 
 def _safe_cell(text: str) -> str:

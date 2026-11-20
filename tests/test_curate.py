@@ -101,6 +101,7 @@ def test_different_language_pairs_and_tones_stay_separate(other):
         ("Manila Bay", "Manila Bay.", "untranslated"),
         ("A sentence of ordinary length.", "x" * 200, "length_outlier"),
         ("A sentence of ordinary length.", "Oo", "length_outlier"),
+        ("Pork products are recalled.", "Ang pag-\u53ec\u56de sa baboy.", "foreign_script"),
     ],
 )
 def test_spam_is_rejected_with_a_reason(text, output, reason):
@@ -109,6 +110,11 @@ def test_spam_is_rejected_with_a_reason(text, output, reason):
 
 def test_short_answers_to_short_inputs_are_fine():
     assert spam_reason(make_event(text="Yes", outputs={"X": "Oo"}), 5.0) is None
+
+
+def test_script_already_in_the_input_is_fine():
+    event = make_event(text="Order the \u5305\u5b50.", outputs={"X": "Pag-order og \u5305\u5b50."})
+    assert spam_reason(event, 5.0) is None
 
 
 def test_ordinary_events_pass():

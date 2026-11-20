@@ -16,9 +16,10 @@ from flywheel import cli as cli_module
 from flywheel.cli import app
 from flywheel.evals import hosted, judge, metrics, modal_host, rating, report, translate
 from flywheel.evals.config import EvalConfig, ModelSpec
-from flywheel.schema import HumanRating, JudgeVerdict, TranslationRecord
+from flywheel.ingest import teacher as teaching
+from flywheel.schema import HumanRating, JudgeVerdict, SourceText, TranslationRecord
 from flywheel.storage import read_jsonl, write_jsonl
-from tests.factories import make_segment
+from tests.factories import make_reference, make_segment
 
 BASELINE = Path(__file__).parent.parent / "configs" / "eval.baseline.toml"
 TEACHER = "google/teacher"
@@ -442,6 +443,53 @@ def write_scores(path, rows, score=lambda row: ("4", "3")):
         writer.writerow(rating.HEADER)
         for row in rows:
             writer.writerow([row.row, row.source, row.translation, *score(row)])
+
+
+def teacher_pairs(corpus: str, count: int) -> list:
+    texts = [
+        SourceText(id=f"{corpus}:{n}", corpus=corpus, document=None, text=f"{corpus} sentence {n}.")
+        for n in range(count)
+    ]
+    answers = {
+        (teaching.TEACHER, text.id): TranslationRecord(
+            segment_id=text.id, model_id=teaching.TEACHER, output=f"{corpus} tudling {n}."
+        )
+        for n, text in enumerate(texts)
+    }
+    return teaching.to_events(texts, answers)
+
+
+class TestSampleSheet:
+    def rows(self, size=6, checks=2, round_name="t1"):
+        pairs = teacher_pairs("wikinews", 10) + teacher_pairs("tatoeba", 3)
+        human = [make_reference(f"h{n}", text=f"Human {n}.") for n in range(4)]
+        return rating.build_sample_rows(pairs, human, "seed", round_name, size, checks)
+
+    def test_draws_evenly_from_each_source(self):
+        sampled = [row for row in self.rows() if row.check is None]
+        sources = [row.segment_id.split(":")[-2] for row in sampled]
+        assert sorted(sources) == ["tatoeba"] * 3 + ["wikinews"] * 3
+        assert {row.model_id for row in sampled} == {teaching.TEACHER}
+        assert all(" tudling " in row.translation for row in sampled)
+
+    def test_checks_use_human_pairs_and_mismatched_answers(self):
+        rows = self.rows()
+        good = [row for row in rows if row.check == "good"]
+        wrong = [row for row in rows if row.check == "wrong"]
+        assert len(good) == len(wrong) == 2
+        assert all(row.source.startswith("Human") for row in good)
+        for row in wrong:
+            assert row.translation != row.source.replace("sentence", "tudling")
+
+    def test_sheet_hides_the_teacher_and_the_checks(self):
+        sheet = rating.render_sheet(self.rows())
+        for hidden in (teaching.TEACHER, "check:", "teacher-"):
+            assert hidden not in sheet
+
+    def test_same_pairs_but_a_new_order_each_round(self):
+        first, second = self.rows(round_name="a"), self.rows(round_name="b")
+        assert {r.segment_id for r in first} == {r.segment_id for r in second}
+        assert [r.segment_id for r in first] != [r.segment_id for r in second]
 
 
 class TestRating:

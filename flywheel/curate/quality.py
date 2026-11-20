@@ -5,10 +5,16 @@ independent corroboration. The score weights are hand-set and not fitted to
 anything. They rank events for dataset thresholds, nothing more.
 """
 
+import re
+
 from flywheel.schema import FeedbackEvent
 from flywheel.text import normalize_text
 
 _MIN_LENGTH_FOR_RATIO = 10
+# Chinese, Japanese and Korean script. A model trained mostly on Chinese sometimes
+# slips a word of it into an answer in another language.
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
+_CJK_LANGS = {"zh", "ja", "ko"}
 _MIN_LENGTH_FOR_REPEATS = 6
 
 _BASE = 0.2
@@ -30,6 +36,12 @@ def spam_reason(event: FeedbackEvent, max_length_ratio: float) -> str | None:
         return "repeated_characters"
     if chosen == text and event.input.effective_src_lang != event.input.tgt_lang:
         return "untranslated"
+    if (
+        _CJK.search(chosen)
+        and not _CJK.search(text)
+        and event.input.tgt_lang.split("_")[0] not in _CJK_LANGS
+    ):
+        return "foreign_script"
     if len(text) >= _MIN_LENGTH_FOR_RATIO:
         ratio = len(chosen) / len(text)
         if ratio > max_length_ratio or ratio < 1 / max_length_ratio:

@@ -1,5 +1,6 @@
 """End to end through the command line, with fixture data only."""
 
+import csv
 import gzip
 import json
 import re
@@ -14,9 +15,9 @@ from typer.testing import CliRunner
 from flywheel.cli import app
 from flywheel.evals import translate as translating
 from flywheel.ingest import flores, opus, sources, teacher
-from flywheel.schema import CuratedEvent, EvalSegment, SourceText
+from flywheel.schema import CuratedEvent, EvalSegment, HumanRating, SourceText, TranslationRecord
 from flywheel.storage import read_jsonl, write_jsonl
-from tests.factories import make_event
+from tests.factories import make_event, make_reference
 
 FIXTURE = Path(__file__).parent / "fixtures" / "comparisons_scan.json"
 runner = CliRunner()
@@ -289,3 +290,42 @@ def test_teacher_refuses_without_source_text_or_over_its_limit(tmp_path, monkeyp
     )
     assert "over the limit" in output
     assert fake.prompts == []
+
+
+def test_a_speaker_checks_a_sample_of_teacher_pairs(tmp_path):
+    data = tmp_path / "data"
+    texts = [
+        SourceText(id=f"tatoeba:v:en:{n}", corpus="tatoeba", document=None, text=f"Line {n}.")
+        for n in range(8)
+    ]
+    answers = {
+        (teacher.TEACHER, text.id): TranslationRecord(
+            segment_id=text.id, model_id=teacher.TEACHER, output=f"Linya {n}."
+        )
+        for n, text in enumerate(texts)
+    }
+    write_jsonl(data / "events" / "teacher-tatoeba.jsonl", teacher.to_events(texts, answers))
+    human = [make_reference(f"h{n}", text=f"Human line {n}.") for n in range(3)]
+    write_jsonl(data / "events" / "opus-tatoeba.jsonl", human)
+    config = tmp_path / "curation.toml"
+    config.write_text("heldout_pct = 0\n")
+    run("curate", "--data-dir", data, "--config", config)
+
+    output = run(
+        "rate", "sample", "--round", "t1", "--size", "4", "--checks", "1", "--data-dir", data
+    )
+    assert "wrote 6 rows" in output
+    sheet = data / "ratings" / "t1" / "sheet.csv"
+    with sheet.open(encoding="utf-8", newline="") as file:
+        rows = [{**row, "adequacy": "5", "fluency": "5"} for row in csv.DictReader(file)]
+    scored = tmp_path / "scored.csv"
+    with scored.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    output = run(
+        "rate", "import", scored, "--round", "t1", "--rater", "speaker-1", "--data-dir", data
+    )
+    assert "stored 6 ratings" in output
+    ratings = read_jsonl(data / "ratings" / "t1" / "ratings-speaker-1.jsonl", HumanRating)
+    assert sum(r.model_id == teacher.TEACHER for r in ratings) == 4

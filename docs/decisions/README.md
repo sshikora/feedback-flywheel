@@ -14,7 +14,7 @@ One short file per decision, so a reader can see the reasoning as well as the ou
 | [0008](0008-continuous-loop.md) | Keep the loop running after launch | Accepted |
 | [0009](0009-real-user-text.md) | Keep real user text from raters and undisclosed providers | Accepted |
 | [0010](0010-evaluation-harness.md) | How the evaluation harness runs | Accepted |
-| [0011](0011-base-model-checks.md) | Base model checks: L4 tier, Qwen3.5 9B leads | Checks done, choice pending human round |
+| [0011](0011-base-model-checks.md) | Base model checks: L4 tier, Qwen3.5 9B chosen | Accepted, confirmed by the first human round |
 | [0012](0012-dataset-builds.md) | How training datasets are built | Accepted |
 | [0013](0013-registry-and-run-configs.md) | Model registry and run configs | Accepted |
 | [0014](0014-training-on-together.md) | Training on Together | Accepted |

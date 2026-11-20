@@ -163,7 +163,8 @@
           "discriminator": {
             "mapping": {
               "preference": "#/$defs/PreferenceSignal",
-              "reference": "#/$defs/ReferenceSignal"
+              "reference": "#/$defs/ReferenceSignal",
+              "teacher": "#/$defs/TeacherSignal"
             },
             "propertyName": "kind"
           },
@@ -173,6 +174,9 @@
             },
             {
               "$ref": "#/$defs/ReferenceSignal"
+            },
+            {
+              "$ref": "#/$defs/TeacherSignal"
             }
           ],
           "title": "Signal"
@@ -248,6 +252,33 @@
         "chosen"
       ],
       "title": "ReferenceSignal",
+      "type": "object"
+    },
+    "TeacherSignal": {
+      "additionalProperties": false,
+      "description": "A teacher model's translation of public text. Its one candidate is that answer.",
+      "properties": {
+        "kind": {
+          "const": "teacher",
+          "default": "teacher",
+          "title": "Kind",
+          "type": "string"
+        },
+        "chosen": {
+          "description": "The model id of the teacher.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "title": "Chosen",
+          "type": "array"
+        }
+      },
+      "required": [
+        "chosen"
+      ],
+      "title": "TeacherSignal",
       "type": "object"
     },
     "TranslationInput": {

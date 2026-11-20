@@ -19,7 +19,7 @@ from flywheel.curate.report import language_pairs, origin_shares
 from flywheel.datasets.builders import Build
 from flywheel.datasets.card import render_card
 from flywheel.datasets.config import DatasetConfig
-from flywheel.ingest.opus import licenses
+from flywheel.ingest import opus, teacher
 from flywheel.schema import DpoPair, SftExample
 from flywheel.storage import write_json
 
@@ -77,7 +77,7 @@ def manifest(
         "config": config.model_dump(),
         "source": source,
         "counts": counts,
-        "licenses": licenses(counts["sources"]),
+        "licenses": {**opus.licenses(counts["sources"]), **teacher.licenses(counts["sources"])},
     }
 
 

@@ -12,6 +12,7 @@ from flywheel.schema.events import (
     PreferenceSignal,
     ReferenceSignal,
     SourceText,
+    TeacherSignal,
     TranslationInput,
 )
 from flywheel.schema.registry import ModelRecord, Status, StatusChange
@@ -33,6 +34,7 @@ __all__ = [
     "SourceText",
     "Status",
     "StatusChange",
+    "TeacherSignal",
     "TranslationInput",
     "TranslationRecord",
 ]

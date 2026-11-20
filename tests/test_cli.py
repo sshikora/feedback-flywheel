@@ -12,6 +12,7 @@ import pytest
 from typer.testing import CliRunner
 
 from flywheel.cli import app
+from flywheel.evals import translate as translating
 from flywheel.ingest import flores, opus, sources
 from flywheel.schema import CuratedEvent, EvalSegment, SourceText
 from flywheel.storage import read_jsonl, write_jsonl
@@ -213,3 +214,78 @@ def test_ingest_english_source_text(tmp_path, monkeypatch):
     (text,) = read_jsonl(data / "sources" / "tatoeba.jsonl", SourceText)
     assert text.text == "I woke up at five."
     assert "unknown source 'wikipedia'" in fail("ingest", "source", "wikipedia")
+
+
+class FlakyTeacher:
+    """Answers every prompt, except that the first one naming `fail` fails once."""
+
+    def __init__(self, fail: str) -> None:
+        self.prompts: list[str] = []
+        self.fail = fail
+
+    def __call__(self, *_args: object, **_kwargs: object) -> "FlakyTeacher":
+        return self
+
+    def complete(self, model: str, prompt: str) -> translating.Completion:
+        self.prompts.append(prompt)
+        if self.fail in prompt:
+            self.fail = "\x00never"
+            raise translating.CompletionError("broken")
+        return translating.Completion(f"Cebuano for: {prompt.rsplit(chr(10), 1)[-1]}", 0.001)
+
+
+def test_teacher_translates_stored_text_into_synthetic_events(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    texts = [
+        SourceText(id=f"tatoeba:v:en:{n}", corpus="tatoeba", document=None, text=text)
+        for n, text in enumerate(
+            ["I woke up at five.", "The market opens early.", "Where is the church?"]
+        )
+    ]
+    write_jsonl(data / "sources" / "tatoeba.jsonl", texts)
+    human = make_event("h1", text="Where is the church?", outputs={"human:x": "Asa ang simbahan?"})
+    write_jsonl(data / "events" / "opus-tatoeba.jsonl", [human])
+    fake = FlakyTeacher(fail="market")
+    monkeypatch.setattr(translating, "OpenRouter", fake)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "key")
+
+    output = run("ingest", "teacher", "tatoeba", "--data-dir", data)
+    assert "skipped 1 (already has a human translation)" in output
+    assert "2 sentences for DeepSeek V4.1 Flash" in output
+    assert "Nothing was sent" in output
+    assert fake.prompts == []
+    assert not (data / "events" / "teacher-tatoeba.jsonl").exists()
+
+    output = run("ingest", "teacher", "tatoeba", "--yes", "--data-dir", data)
+    assert "1 failed" in output
+    assert "stored 1 events" in output
+    output = run("ingest", "teacher", "tatoeba", "--yes", "--data-dir", data)
+    assert "1 sentences for DeepSeek" in output
+    assert "0 failed" in output and "stored 2 events" in output
+    assert len(fake.prompts) == 3
+
+    config = tmp_path / "curation.toml"
+    config.write_text("heldout_pct = 0\n")
+    run("curate", "--data-dir", data, "--config", config)
+    run("build", "sft", "--data-dir", data)
+    (snapshot,) = (data / "datasets").iterdir()
+    card = (snapshot / "DATA_CARD.md").read_text()
+    assert "**teacher-tatoeba:** CC BY 2.0 FR." in card
+    assert "Translated by DeepSeek V4.1 Flash" in card
+    assert "1 human and 2 synthetic events" in card
+
+
+def test_teacher_refuses_without_source_text_or_over_its_limit(tmp_path, monkeypatch):
+    assert "Run `flywheel ingest source wikinews`" in fail(
+        "ingest", "teacher", "wikinews", "--data-dir", tmp_path
+    )
+    text = SourceText(id="t:0", corpus="tatoeba", document=None, text="I woke up at five.")
+    write_jsonl(tmp_path / "sources" / "tatoeba.jsonl", [text])
+    fake = FlakyTeacher(fail="\x00never")
+    monkeypatch.setattr(translating, "OpenRouter", fake)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "key")
+    output = fail(
+        "ingest", "teacher", "tatoeba", "--yes", "--max-cost-usd", "0", "--data-dir", tmp_path
+    )
+    assert "over the limit" in output
+    assert fake.prompts == []

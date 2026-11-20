@@ -48,6 +48,13 @@ class Completer(Protocol):
     def complete(self, model: str, prompt: str) -> Completion: ...
 
 
+class Item(Protocol):
+    """Anything with an id to translate: an eval segment, or a teacher's source text."""
+
+    @property
+    def id(self) -> str: ...
+
+
 class OpenRouter:
     def __init__(
         self,
@@ -55,6 +62,7 @@ class OpenRouter:
         reasoning_effort: Mapping[str, str] | None = None,
         transport: httpx.BaseTransport | None = None,
         wait: Callable[[float], None] = time.sleep,
+        routing: Mapping[str, Any] = ROUTING,
     ) -> None:
         self._client = httpx.Client(
             base_url=OPENROUTER_URL,
@@ -64,6 +72,7 @@ class OpenRouter:
         )
         self._reasoning_effort = dict(reasoning_effort or {})
         self._wait = wait
+        self._routing = dict(routing)
 
     def complete(self, model: str, prompt: str) -> Completion:
         effort = self._reasoning_effort.get(model)
@@ -72,7 +81,7 @@ class OpenRouter:
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": MAX_TOKENS,
             "usage": {"include": True},
-            **ROUTING,
+            **self._routing,
             "reasoning": {"effort": effort} if effort else {"enabled": False},
         }
         failure = "no attempts made"
@@ -152,18 +161,18 @@ class Budget:
             return self.spent_usd > self.limit_usd
 
 
-def _translate(
-    completer: Completer, model: str, segment: EvalSegment, budget: Budget
+def _translate[T: Item](
+    completer: Completer, model: str, item: T, prompt: Callable[[T], str], budget: Budget
 ) -> TranslationRecord | None:
     if budget.exhausted:
         return None
     try:
-        answer = completer.complete(model, build_prompt(segment))
+        answer = completer.complete(model, prompt(item))
     except CompletionError as err:
-        return TranslationRecord(segment_id=segment.id, model_id=model, error=str(err))
+        return TranslationRecord(segment_id=item.id, model_id=model, error=str(err))
     budget.charge(answer.cost_usd)
     return TranslationRecord(
-        segment_id=segment.id, model_id=model, output=answer.text, cost_usd=answer.cost_usd
+        segment_id=item.id, model_id=model, output=answer.text, cost_usd=answer.cost_usd
     )
 
 
@@ -175,10 +184,22 @@ def translate(
     spent_usd: float = 0.0,
 ) -> float:
     """Run the work and return total spend. Stops once the budget is passed."""
+    return complete_all(work, build_prompt, completer, path, max_cost_usd, spent_usd)
+
+
+def complete_all[T: Item](
+    work: list[tuple[str, T]],
+    prompt: Callable[[T], str],
+    completer: Completer,
+    path: Path,
+    max_cost_usd: float,
+    spent_usd: float = 0.0,
+) -> float:
+    """Ask each model for each item's prompt, as `translate` does for eval segments."""
     budget = Budget(max_cost_usd, spent_usd)
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futures: list[Future[TranslationRecord | None]] = [
-            pool.submit(_translate, completer, model, segment, budget) for model, segment in work
+            pool.submit(_translate, completer, model, item, prompt, budget) for model, item in work
         ]
         try:
             for future in as_completed(futures):

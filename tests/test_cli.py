@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 
 from flywheel.cli import app
 from flywheel.evals import translate as translating
-from flywheel.ingest import flores, opus, sources
+from flywheel.ingest import flores, opus, sources, teacher
 from flywheel.schema import CuratedEvent, EvalSegment, SourceText
 from flywheel.storage import read_jsonl, write_jsonl
 from tests.factories import make_event
@@ -246,8 +246,8 @@ def test_teacher_translates_stored_text_into_synthetic_events(tmp_path, monkeypa
     human = make_event("h1", text="Where is the church?", outputs={"human:x": "Asa ang simbahan?"})
     write_jsonl(data / "events" / "opus-tatoeba.jsonl", [human])
     fake = FlakyTeacher(fail="market")
-    monkeypatch.setattr(translating, "OpenRouter", fake)
-    monkeypatch.setenv("OPENROUTER_API_KEY", "key")
+    monkeypatch.setattr(teacher, "DeepSeek", fake)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
 
     output = run("ingest", "teacher", "tatoeba", "--data-dir", data)
     assert "skipped 1 (already has a human translation)" in output
@@ -282,8 +282,8 @@ def test_teacher_refuses_without_source_text_or_over_its_limit(tmp_path, monkeyp
     text = SourceText(id="t:0", corpus="tatoeba", document=None, text="I woke up at five.")
     write_jsonl(tmp_path / "sources" / "tatoeba.jsonl", [text])
     fake = FlakyTeacher(fail="\x00never")
-    monkeypatch.setattr(translating, "OpenRouter", fake)
-    monkeypatch.setenv("OPENROUTER_API_KEY", "key")
+    monkeypatch.setattr(teacher, "DeepSeek", fake)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
     output = fail(
         "ingest", "teacher", "tatoeba", "--yes", "--max-cost-usd", "0", "--data-dir", tmp_path
     )

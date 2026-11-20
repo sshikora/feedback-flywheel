@@ -1,6 +1,6 @@
 # 0017: Synthetic pairs: the teacher and the English text
 
-**Status:** Accepted, 2026-11-12. Source text is loaded. Updated 2026-11-19: the teacher step is built.
+**Status:** Accepted, 2026-11-12. Source text is loaded. Updated 2026-11-19: the teacher step is built. Updated 2026-11-20: the teacher is called on DeepSeek's own API, not through OpenRouter.
 
 **Context.** The first trained model tied with its base, as expected from 1,781 corpus pairs (`0016`). The volume has to come from synthetic pairs, plan step 3, which needs two things: a teacher model whose terms allow training on its output, and English text we may use. `0011` left open whether answers written by Gemini may train.
 
@@ -50,7 +50,8 @@ Wikinews drops most for unbalanced quotes, 23,050 sentences, nearly all cut from
 **The teacher step, 2026-11-19.**
 
 - **`flywheel ingest teacher <source>` translates a stored draw.** Without `--yes` it only prints an upper bound on the cost, at DeepSeek's peak rate. Off-peak hours cost half. It refuses to start a run whose bound passes `--max-cost-usd`.
-- **Requests go to DeepSeek's own API only.** OpenRouter is told to use the `deepseek` provider with no fallback, so no other host's terms apply. The app's zero-retention routing is dropped for this command only, because the text is public.
+- **Requests go to DeepSeek's own API, not through OpenRouter.** The first plan pinned OpenRouter to its `deepseek` provider with no fallback. OpenRouter refused: the account's privacy setting blocks providers that may train on paid prompts, and DeepSeek is one. That setting protects the app's real user text, so it stays, and the teacher calls DeepSeek directly with its own key, `DEEPSEEK_API_KEY`. No other host's terms apply. The app's zero-retention routing does not apply here either, because the text is public.
+- **DeepSeek's API reports tokens, not cost,** so the cost is worked out from its price list: $0.30 per million input tokens, $0.006 per million cached input tokens and $1.20 per million output tokens at peak, and half that off-peak. Peak is 01:00 to 04:00 and 06:00 to 10:00 UTC on weekdays. A request that starts or ends in peak hours is charged at peak, and Chinese public holidays, which DeepSeek bills off-peak, are charged at peak too, so the recorded spend errs high. The API names the model `deepseek-flash`, which served V4.1 Flash 1017 on 2026-11-20. Thinking is turned off, as in the M2 baseline.
 - **The prompt is the app's,** with English named as the source, so the model learns from what the app sends.
 - **Answers are stored as they arrive.** A rerun asks only for what is missing or failed.
 - **An answer becomes a synthetic event** with a new signal kind, `teacher`, because `reference` means a human translation. It is not a vote, so vote statistics leave it out. Curation's spam, dedupe and leak checks apply to it as to any event.
@@ -67,6 +68,7 @@ Both downloads are pinned to dated files. Wikimedia removes dated dumps after a 
 
 - [Gemini API additional terms](https://ai.google.dev/gemini-api/terms)
 - [DeepSeek Open Platform terms of service](https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html) and [terms of use](https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html)
+- [DeepSeek API models and pricing](https://api-docs.deepseek.com/quick_start/pricing/)
 - [DeepSeek V4.1 Flash model card](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017) and [Gemma 4 31B model card](https://huggingface.co/google/gemma-4-31b-it)
 - [OpenRouter terms of service](https://openrouter.ai/terms)
 - [Anthropic commercial terms](https://www.anthropic.com/legal/commercial-terms)

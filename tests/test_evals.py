@@ -164,20 +164,6 @@ class TestOpenRouter:
         assert seen["reasoning"] == {"enabled": False}
         assert seen["max_tokens"] == translate.MAX_TOKENS
 
-    def test_a_caller_can_pin_its_own_routing(self):
-        seen = {}
-
-        def handler(request):
-            seen.update(json.loads(request.content))
-            return success()
-
-        routing = {"provider": {"order": ["deepseek"], "allow_fallbacks": False}}
-        client = translate.OpenRouter(
-            "key", transport=httpx.MockTransport(handler), wait=lambda _: None, routing=routing
-        )
-        client.complete("x/y", "prompt")
-        assert seen["provider"] == routing["provider"]
-
     def test_retries_rate_limits_and_server_errors(self):
         responses = [httpx.Response(429), httpx.Response(503), success()]
         assert openrouter(lambda _: responses.pop(0)).complete("x/y", "p").text == "Hello"

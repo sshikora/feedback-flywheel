@@ -62,7 +62,6 @@ class OpenRouter:
         reasoning_effort: Mapping[str, str] | None = None,
         transport: httpx.BaseTransport | None = None,
         wait: Callable[[float], None] = time.sleep,
-        routing: Mapping[str, Any] = ROUTING,
     ) -> None:
         self._client = httpx.Client(
             base_url=OPENROUTER_URL,
@@ -72,7 +71,6 @@ class OpenRouter:
         )
         self._reasoning_effort = dict(reasoning_effort or {})
         self._wait = wait
-        self._routing = dict(routing)
 
     def complete(self, model: str, prompt: str) -> Completion:
         effort = self._reasoning_effort.get(model)
@@ -81,25 +79,33 @@ class OpenRouter:
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": MAX_TOKENS,
             "usage": {"include": True},
-            **self._routing,
+            **ROUTING,
             "reasoning": {"effort": effort} if effort else {"enabled": False},
         }
-        failure = "no attempts made"
-        for attempt in range(ATTEMPTS):
-            try:
-                response = self._client.post("/chat/completions", json=body)
-            except httpx.TransportError as err:
-                failure = repr(err)
-            else:
-                if response.status_code != 429 and response.status_code < 500:
-                    # Other 4xx errors (bad key, no credit, unknown model) hit every
-                    # request alike, so they stop the run and are not recorded.
-                    if response.is_error:
-                        raise RequestRejected(f"{model}: {_error_message(response)}")
-                    return _parse(response.json())
-                failure = f"HTTP {response.status_code}"
-            self._wait(2**attempt)
-        raise CompletionError(failure)
+        return _parse(post_chat(self._client, model, body, self._wait))
+
+
+def post_chat(
+    client: httpx.Client, model: str, body: Mapping[str, Any], wait: Callable[[float], None]
+) -> dict[str, Any]:
+    """Send a chat completion, retrying rate limits, server errors and network errors."""
+    failure = "no attempts made"
+    for attempt in range(ATTEMPTS):
+        try:
+            response = client.post("/chat/completions", json=body)
+        except httpx.TransportError as err:
+            failure = repr(err)
+        else:
+            if response.status_code != 429 and response.status_code < 500:
+                # Other 4xx errors (bad key, no credit, unknown model) hit every
+                # request alike, so they stop the run and are not recorded.
+                if response.is_error:
+                    raise RequestRejected(f"{model}: {_error_message(response)}")
+                payload: dict[str, Any] = response.json()
+                return payload
+            failure = f"HTTP {response.status_code}"
+        wait(2**attempt)
+    raise CompletionError(failure)
 
 
 def _error_message(response: httpx.Response) -> str:
@@ -111,12 +117,15 @@ def _error_message(response: httpx.Response) -> str:
 
 def _parse(payload: dict[str, Any]) -> Completion:
     # A missing cost fails the run, because the budget check depends on it.
-    cost = float(payload["usage"]["cost"])
+    return Completion(answer_text(payload), float(payload["usage"]["cost"]))
+
+
+def answer_text(payload: dict[str, Any]) -> str:
     choices = payload.get("choices") or []
     text = ((choices[0].get("message") or {}).get("content") or "").strip() if choices else ""
     if not text:
         raise CompletionError("empty answer")
-    return Completion(text, cost)
+    return str(text)
 
 
 def build_prompt(segment: EvalSegment) -> str:

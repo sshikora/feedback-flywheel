@@ -212,11 +212,11 @@ def ingest_teacher(
         if estimate > max_cost_usd - spent:
             typer.echo(f"stopped: this could cost ${estimate:.2f}, over the limit.", err=True)
             raise typer.Exit(code=1)
-        api_key = os.environ.get("OPENROUTER_API_KEY")
+        api_key = os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
-            typer.echo("OPENROUTER_API_KEY is not set.", err=True)
+            typer.echo("DEEPSEEK_API_KEY is not set.", err=True)
             raise typer.Exit(code=1)
-        completer = translating.OpenRouter(api_key, routing=teacher.ROUTING)
+        completer = teacher.DeepSeek(api_key)
         try:
             spent = translating.complete_all(
                 work, teacher.prompt, completer, path, max_cost_usd, spent

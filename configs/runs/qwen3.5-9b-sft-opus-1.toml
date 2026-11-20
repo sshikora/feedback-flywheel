@@ -1,0 +1,24 @@
+# The first real run, a pipeline check. It trains on human translations from
+# public corpora only (Tatoeba and translatewiki, no votes), so it proves the
+# build, upload, training, download and eval steps. The base model choice stays
+# open until the first human round; see docs/decisions/0011.
+
+name = "qwen3.5-9b-sft-opus-1"
+description = "Pipeline check. English to Cebuano translation, LoRA SFT on 1,781 human translations from Tatoeba and translatewiki."
+base_model = "Qwen/Qwen3.5-9B"
+method = "sft"
+dataset = "d1b0fc0a8e68aa81ee9421ba31405ce79431aa100f42e3a27e3fc7dd7920a997"  # from flywheel build
+seed = 1
+max_cost_usd = 10.0       # refused if Together's estimate is higher. Jobs cost at least $4.
+
+[hyperparameters]
+epochs = 3
+learning_rate = 0.0001
+batch_size = 8
+lora_rank = 64
+lora_alpha = 128
+
+[gate]
+min_judge_win_rate = 0.55
+guard_set = "flores200-dev-en-ceb"
+human_check = true

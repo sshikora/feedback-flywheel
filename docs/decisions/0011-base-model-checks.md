@@ -4,7 +4,7 @@
 
 **Context.** The M2 baseline ranked three candidate base models. Before one is chosen, the plan requires three checks: the trained adapter can be exported, the license allows self-hosting, and the model fits the cheapest GPU tier. These checks are free and need no training run.
 
-**Export.** All three are on Together's LoRA fine-tuning list with both SFT and DPO: `google/gemma-4-26B-A4B-it`, `Qwen/Qwen3.5-9B` and `meta-llama/Meta-Llama-3.1-8B-Instruct-Reference`. Together documents two downloads. The merged variant is the base model with the adapter folded in, ready for any inference framework. The adapter-only variant uses a layout PEFT cannot load, so the pipeline downloads the merged model. The docs state no model restriction on downloads, which is only proven by a first real download at M3. Together also requires a $100 minimum credit balance, which fits the one-time experimentation budget.
+**Export.** All three are on Together's LoRA fine-tuning list with both SFT and DPO: `google/gemma-4-26B-A4B-it`, `Qwen/Qwen3.5-9B` and `meta-llama/Meta-Llama-3.1-8B-Instruct-Reference`. Together documents two downloads. The merged variant is the base model with the adapter folded in, ready for any inference framework. The adapter-only variant uses a layout PEFT cannot load, so the pipeline downloads the merged model. The docs state no model restriction on downloads, which is only proven by a first real download at M3. Together needs a first credit purchase of at least $15, and a balance that covers each job. (This first said $100, which Together's billing docs do not support. Corrected 2026-11-05.)
 
 **License.**
 

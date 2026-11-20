@@ -21,18 +21,21 @@ The baseline is measured, and nothing is trained yet. Six models translated all 
 | Qwen3.5 9B | 45.74 [45.18, 46.36] | 0 |
 | Llama 3.1 8B | 37.15 [36.49, 37.84] | 18 |
 
-The first four are the translation app's models. The smaller ones are candidates to fine-tune, and the goal is to close the gap. A blind judge comparing each candidate with the app's models finds the same gaps. Qwen3.5 9B and Llama 3.1 8B lose nearly every comparison, while Gemma 4 26B A4B is close to even with all but Gemini. A native speaker is scoring a blind sample now, and those scores settle the base model.
+The first three make up the translation app's free compare set. The other three are candidates to fine-tune, and the goal is to close the gap. A blind judge comparing each candidate with the app's models finds the same gaps. Qwen3.5 9B and Llama 3.1 8B lose nearly every comparison, while Gemma 4 26B A4B is close to even with all but Gemini. A native speaker is scoring a blind sample now, and those scores settle the base model.
 
 | Stage | State |
 |---|---|
 | Event schema, JSON Schema export | Done |
-| Ingest: JSONL, comparisons export, FLORES-200 | Done |
+| Ingest: JSONL, comparisons export, FLORES-200, human-translated OPUS corpora | Done |
 | Curation: PII and secret scrubbing, dedupe, quality scoring, leakage protection | Done |
 | Evaluation harness: chrF++, blind judge, human ratings, HTML report | Done |
 | Baseline: machine scores | Done |
 | Baseline: first native-speaker round | In progress |
 | Base model checks: export, license, GPU fit | Done, see [0011](docs/decisions/0011-base-model-checks.md) |
-| Training, registry, promotion gates | Planned |
+| Datasets: SFT and DPO builders, hashed snapshots, data cards | Done |
+| Registry: run configs, status history, model cards | Done |
+| Training on Together: upload, price, start, status, download | Built, not yet run |
+| Promotion gates | Planned |
 | Live integration | Planned |
 
 The full design is in [PLAN.md](PLAN.md), and the reasoning behind major choices is in [docs/decisions](docs/decisions).
@@ -44,11 +47,15 @@ Requires [uv](https://docs.astral.sh/uv/).
 ```sh
 uv sync
 uv run flywheel ingest flores --src en --tgt ceb --split devtest
+uv run flywheel ingest flores --src en --tgt ceb --split dev
+uv run flywheel ingest opus tatoeba    # and translatewiki, bible-uedin
+uv run flywheel ingest source wikinews # English for a teacher to translate; and tatoeba
 uv run flywheel ingest comparisons tests/fixtures/comparisons_scan.json --training-from 2026-10-27
 uv run flywheel curate
+uv run flywheel build sft    # and `build dpo`
 ```
 
-Votes may train only if they were cast after `--training-from`, the date the app's privacy page began naming the training provider. Without it, none may. Output lands in `data/`, which is never committed. `data/curated/report.json` has the counts behind each decision: what was dropped and why, the human versus synthetic share, and vote statistics by model.
+Both FLORES splits are loaded so that curation keeps their text out of training. The OPUS corpora are the ones whose license and origin passed the check in [0015](docs/decisions/0015-public-parallel-text.md), and each data card credits them. Votes may train only if they were cast after `--training-from`, the date the app's privacy page began naming the training provider. Without it, none may. Output lands in `data/`, which is never committed. `data/curated/report.json` has the counts behind each decision: what was dropped and why, the human versus synthetic share, and vote statistics by model. Each build writes a snapshot to `data/datasets/`, named by the hash of its examples, with a manifest and a data card.
 
 ### Evaluate models
 
@@ -61,6 +68,17 @@ uv run flywheel report                        # free, and can be rerun at any ti
 ```
 
 The report is written to `data/runs/`. For human scoring, `flywheel rate export --round m2-a` writes a blind sheet and a separate key, and `flywheel rate import` loads the scores. Raters follow [docs/rating-guide.md](docs/rating-guide.md).
+
+### Train a model
+
+Training needs `TOGETHER_API_KEY` and runs from a checked-in config, such as a copy of [configs/run.example.toml](configs/run.example.toml) that names a built snapshot.
+
+```sh
+uv run flywheel train start configs/runs/<name>.toml          # uploads the file and shows the price
+uv run flywheel train start configs/runs/<name>.toml --yes    # starts the job, once
+uv run flywheel train status <name>                           # registers it as a candidate when done
+uv run flywheel train download <name>                         # merged weights, about 19 GB for 9B
+```
 
 ## How curation protects the evaluation
 

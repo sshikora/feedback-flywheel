@@ -12,11 +12,34 @@ class Settings(BaseModel):
 
 
 class ModelSpec(Settings):
-    id: str = Field(pattern=r"^[^/]+/.+$", description="An OpenRouter model id.")
+    id: str = Field(
+        pattern=r"^[^/]+/.+$",
+        description="An OpenRouter model id, or a name for a self-hosted model.",
+    )
     role: Literal["compare", "base"]
     reasoning_effort: Literal["low"] | None = Field(
         default=None, description="For models that cannot run with reasoning off."
     )
+    host: Literal["openrouter", "modal"] = "openrouter"
+    weights: str | None = Field(
+        default=None,
+        pattern=r"^(hf|run):.+$",
+        description="For Modal: hf:<repo> for a base model, run:<name> for a trained one.",
+    )
+
+    @model_validator(mode="after")
+    def _weights_only_when_self_hosted(self) -> Self:
+        if (self.host == "modal") != (self.weights is not None):
+            raise ValueError(f"{self.id}: a Modal model needs weights, and only it takes them")
+        if self.host == "modal" and self.reasoning_effort is not None:
+            raise ValueError(f"{self.id}: reasoning_effort applies to OpenRouter models only")
+        return self
+
+    @property
+    def weights_key(self) -> str:
+        """The model's folder in the Modal volume."""
+        kind, _, name = (self.weights or "").partition(":")
+        return name if kind == "run" else f"hf--{name.replace('/', '--')}"
 
 
 class JudgeSettings(Settings):
@@ -35,6 +58,13 @@ class RatingSettings(Settings):
 
 class EvalConfig(Settings):
     name: str = Field(pattern=r"^[a-z0-9-]+$")
+    purpose: Literal["baseline", "candidate"] = Field(
+        default="baseline",
+        description=(
+            "baseline ranks base models by headroom. candidate scores one trained model, "
+            "role base, against the one model it must beat, role compare."
+        ),
+    )
     eval_set: str = Field(description="A file in data/eval, without its extension.")
     models: list[ModelSpec] = Field(min_length=2)
     judge: JudgeSettings = JudgeSettings()
@@ -57,6 +87,12 @@ class EvalConfig(Settings):
     def _both_roles_present(self) -> Self:
         if {m.role for m in self.models} != {"compare", "base"}:
             raise ValueError("a run needs at least one compare model and one base model")
+        return self
+
+    @model_validator(mode="after")
+    def _a_candidate_meets_one_model(self) -> Self:
+        if self.purpose == "candidate" and len(self.models) != 2:
+            raise ValueError("a candidate run has one base model and one compare model")
         return self
 
     def model_ids(self, role: Literal["compare", "base"]) -> list[str]:

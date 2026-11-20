@@ -6,14 +6,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+import modal
 import numpy as np
 import pytest
 from sacrebleu.metrics.chrf import CHRF
 from typer.testing import CliRunner
 
+from flywheel import cli as cli_module
 from flywheel.cli import app
-from flywheel.evals import judge, metrics, rating, report, translate
-from flywheel.evals.config import EvalConfig
+from flywheel.evals import hosted, judge, metrics, modal_host, rating, report, translate
+from flywheel.evals.config import EvalConfig, ModelSpec
 from flywheel.schema import HumanRating, JudgeVerdict, TranslationRecord
 from flywheel.storage import read_jsonl, write_jsonl
 from tests.factories import make_segment
@@ -590,6 +592,41 @@ class TestReport:
         assert built["recommended_base"] is None
         assert "No candidate base" in report.render_html(built)
 
+    def test_a_candidate_report_shows_its_gain_over_the_model_it_must_beat(self):
+        segments = make_segments(40)
+        config = make_config(purpose="candidate")
+        inputs = make_inputs(
+            segments, lambda s: s.reference, lambda s: s.reference[:8], config=config
+        )
+        built = report.build_report(inputs)
+        assert built["candidate"]["model"] == BASE
+        assert built["candidate"]["against"] == TEACHER
+        assert built["candidate"]["chrf_gain"]["low"] > 0
+        assert built["candidate"]["judge_win_rate"] is None
+        page = report.render_html(built)
+        assert "chrF++ gain +" in page
+        assert "better." in page
+        assert "The judge has not run yet." in page
+        assert "Headroom" not in page
+        assert "Worst sentences against the base model" in page
+
+    def test_a_candidate_within_its_range_is_a_tie(self):
+        segments = make_segments(40)
+        config = make_config(purpose="candidate")
+        built = report.build_report(make_inputs(segments, lambda s: s.reference, config=config))
+        assert "a tie." in report.render_html(built)
+
+    def test_a_candidate_run_meets_exactly_one_model(self):
+        with pytest.raises(ValueError, match="one base model and one compare model"):
+            make_config(
+                purpose="candidate",
+                models=[
+                    {"id": TEACHER, "role": "compare"},
+                    {"id": "google/other", "role": "compare"},
+                    {"id": BASE, "role": "base"},
+                ],
+            )
+
     def test_failures_count_against_a_model(self):
         segments = make_segments(10)
         built = report.build_report(
@@ -811,3 +848,224 @@ class TestCommands:
         cli("report", *self.common(workspace))
         built = json.loads((workspace.data / "runs" / "test-run" / "report.json").read_text())
         assert built["human"]["raters"] == ["rater-1"]
+
+
+# --- self-hosted models on Modal ---
+
+
+class TestSelfHosted:
+    def test_a_modal_model_needs_weights_and_only_it_takes_them(self):
+        with pytest.raises(ValueError, match="needs weights"):
+            ModelSpec(id="flywheel/m", role="base", host="modal")
+        with pytest.raises(ValueError, match="needs weights"):
+            ModelSpec(id="qwen/m", role="base", weights="hf:Qwen/Qwen3.5-9B")
+        with pytest.raises(ValueError, match="OpenRouter models only"):
+            ModelSpec(
+                id="flywheel/m", role="base", host="modal", weights="run:x", reasoning_effort="low"
+            )
+        with pytest.raises(ValueError):
+            ModelSpec(id="flywheel/m", role="base", host="modal", weights="s3:bucket")
+
+    def test_weights_have_one_folder_each(self):
+        base = ModelSpec(id="modal/q", role="compare", host="modal", weights="hf:Qwen/Qwen3.5-9B")
+        trained = ModelSpec(id="flywheel/q", role="base", host="modal", weights="run:q-sft-1")
+        assert base.weights_key == "hf--Qwen--Qwen3.5-9B"
+        assert trained.weights_key == "q-sft-1"
+
+    def test_a_call_starts_with_the_weights_source_and_every_prompt(self, monkeypatch):
+        spawned = []
+
+        class Evaluate:
+            def spawn(self, *args, **kwargs):
+                spawned.append((args, kwargs))
+                return SimpleNamespace(object_id="fc-1")
+
+        monkeypatch.setattr(modal_host.app, "deploy", lambda: None)
+        monkeypatch.setattr(modal_host, "evaluate", Evaluate())
+        trained = ModelSpec(id="flywheel/q", role="base", host="modal", weights="run:q-sft-1")
+        base = ModelSpec(id="modal/q", role="compare", host="modal", weights="hf:Qwen/Qwen3.5-9B")
+        assert (
+            hosted.start_on_modal(trained, make_segments(2), "https://signed.example/w") == "fc-1"
+        )
+        hosted.start_on_modal(base, make_segments(1), None)
+
+        (key, prompts), source = spawned[0]
+        assert key == "q-sft-1"
+        assert len(prompts) == 2
+        assert source == {"url": "https://signed.example/w"}
+        assert spawned[1][0][0] == "hf--Qwen--Qwen3.5-9B"
+        assert spawned[1][1] == {"repo": "Qwen/Qwen3.5-9B"}
+
+    def fake_call(self, monkeypatch, outcome):
+        def get():
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        monkeypatch.setattr(modal.FunctionCall, "from_id", lambda call_id: SimpleNamespace(get=get))
+
+    def test_records_split_the_gpu_time_and_keep_empty_answers_as_failures(self, monkeypatch):
+        answers = [
+            modal_host.Generation("Maayong buntag.", "stop"),
+            modal_host.Generation("", "stop"),
+        ]
+        self.fake_call(monkeypatch, (answers, 100.0))
+        spec = ModelSpec(id="flywheel/q", role="base", host="modal", weights="run:q-sft-1")
+        records = hosted.collect_from_modal("fc-1", spec, make_segments(2))
+        assert records[0].output == "Maayong buntag."
+        assert records[1].error == "empty answer"
+        assert records[0].cost_usd == pytest.approx(50 * modal_host.GPU_USD_PER_SECOND)
+
+    @pytest.mark.parametrize(
+        ("error", "kind"),
+        [
+            (ConnectionResetError("reset"), hosted.StillRunning),
+            (modal.exception.ConnectionError("lost"), hosted.StillRunning),
+            (modal.exception.RemoteError("cancelled"), hosted.HostError),
+            (ValueError("vLLM could not load the model"), hosted.HostError),
+        ],
+    )
+    def test_a_lost_connection_is_told_apart_from_a_failed_call(self, monkeypatch, error, kind):
+        self.fake_call(monkeypatch, error)
+        spec = ModelSpec(id="modal/q", role="compare", host="modal", weights="hf:Qwen/Qwen3.5-9B")
+        with pytest.raises(kind):
+            hosted.collect_from_modal("fc-1", spec, make_segments(1))
+
+    def test_a_modal_refusal_is_one_line(self, monkeypatch):
+        def refuse():
+            raise modal.exception.InvalidError(
+                "Please add a payment method to use L4 GPU functions."
+            )
+
+        monkeypatch.setattr(modal_host.app, "deploy", refuse)
+        spec = ModelSpec(id="modal/q", role="compare", host="modal", weights="hf:Qwen/Qwen3.5-9B")
+        with pytest.raises(hosted.HostError, match="InvalidError: Please add a payment method"):
+            hosted.start_on_modal(spec, make_segments(1), None)
+
+    @pytest.fixture
+    def hosted_workspace(self, workspace, monkeypatch):
+        workspace.config.write_text(
+            'name = "test-run"\neval_set = "test-set"\nresamples = 100\nmax_cost_usd = 1.0\n'
+            '[[models]]\nid = "modal/base"\nrole = "compare"\nhost = "modal"\n'
+            'weights = "hf:Qwen/Qwen3.5-9B"\n'
+            '[[models]]\nid = "flywheel/trained"\nrole = "base"\nhost = "modal"\n'
+            'weights = "run:trained-1"\n'
+            "[judge]\nsentences = 5\n",
+            encoding="utf-8",
+        )
+        state = workspace.data / "training" / "trained-1" / "state.json"
+        state.parent.mkdir(parents=True)
+        state.write_text(
+            json.dumps(
+                {
+                    "name": "trained-1",
+                    "run_config": "configs/runs/trained-1.toml",
+                    "run_config_hash": "h",
+                    "dataset": "d",
+                    "training_file_sha256": "s",
+                    "lines": 1,
+                    "skipped": {},
+                    "job_id": "ft-1",
+                    "status": "completed",
+                }
+            )
+        )
+        workspace.started = []
+        workspace.collected = []
+        workspace.collect_error = None
+        segments_of = {}
+
+        def start_on_modal(spec, segments, url):
+            call_id = f"fc-{len(workspace.started) + 1}"
+            workspace.started.append((spec.id, len(segments), url))
+            segments_of[call_id] = segments
+            return call_id
+
+        def collect_from_modal(call_id, spec, segments):
+            workspace.collected.append((call_id, spec.id, len(segments)))
+            if workspace.collect_error is not None:
+                raise workspace.collect_error
+            return [
+                TranslationRecord(
+                    segment_id=s.id, model_id=spec.id, output=f"{spec.id} {s.id}", cost_usd=0.001
+                )
+                for s in segments
+            ]
+
+        class FakeTogether:
+            def download_url(self, job_id):
+                return f"https://signed.example/{job_id}"
+
+        monkeypatch.setattr(hosted, "start_on_modal", start_on_modal)
+        monkeypatch.setattr(hosted, "collect_from_modal", collect_from_modal)
+        monkeypatch.setattr(hosted, "worst_case_usd", lambda: 0.4)
+        monkeypatch.setattr(cli_module, "_together", FakeTogether)
+        monkeypatch.delenv("OPENROUTER_API_KEY")
+        return workspace
+
+    def translate(self, ws, *extra):
+        return runner.invoke(
+            app,
+            ["eval", "translate", "--yes", "--config", str(ws.config), "--data-dir", str(ws.data)]
+            + [str(arg) for arg in extra],
+        )
+
+    def test_translate_runs_each_model_once_without_an_openrouter_key(self, hosted_workspace):
+        ws = hosted_workspace
+        common = ("--config", ws.config, "--data-dir", ws.data)
+        assert "at most $0.40" in cli("eval", "translate", *common)
+        assert ws.started == []
+        output = cli("eval", "translate", "--yes", *common)
+        assert ws.started == [
+            ("modal/base", 30, None),
+            ("flywheel/trained", 30, "https://signed.example/ft-1"),
+        ]
+        assert "$0.06 spent in total, 0 failed" in output
+        cli("eval", "translate", "--yes", *common)
+        assert len(ws.started) == 2
+        assert ws.completer.calls == []
+        assert json.loads((ws.data / "runs" / "test-run" / "modal-calls.json").read_text()) == {}
+
+    def test_a_lost_connection_is_collected_by_the_next_run(self, hosted_workspace):
+        ws = hosted_workspace
+        ws.collect_error = hosted.StillRunning("ConnectionError: lost")
+        result = self.translate(ws, "--limit", 3)
+        assert result.exit_code == 1
+        assert "carries on there as fc-1" in result.output
+        assert "Traceback" not in result.output
+
+        ws.collect_error = None
+        result = self.translate(ws)
+        assert result.exit_code == 0, result.output
+        assert "collecting fc-1" in result.output
+        assert ws.collected[1] == ("fc-1", "modal/base", 3)
+        assert ws.started[1] == ("modal/base", 27, None)
+        records = translate.read_translations(ws.data / "runs" / "test-run" / "translations.jsonl")
+        assert len(records) == 60
+
+    def test_a_failed_call_is_dropped_so_the_next_run_starts_again(self, hosted_workspace):
+        ws = hosted_workspace
+        ws.collect_error = hosted.HostError("RemoteError: cancelled")
+        result = self.translate(ws)
+        assert result.exit_code == 1
+        assert "stopped: Modal said RemoteError: cancelled." in result.output
+        ws.collect_error = None
+        assert self.translate(ws).exit_code == 0
+        assert [call[0] for call in ws.started] == ["modal/base", "modal/base", "flywheel/trained"]
+
+    def test_translate_reports_a_modal_refusal(self, hosted_workspace, monkeypatch):
+        def refuse(spec, segments, url):
+            raise hosted.HostError("InvalidError: Please add a payment method.")
+
+        monkeypatch.setattr(hosted, "start_on_modal", refuse)
+        result = self.translate(hosted_workspace)
+        assert result.exit_code == 1
+        assert "stopped: Modal said InvalidError: Please add a payment method." in result.output
+        assert "Traceback" not in result.output
+
+    def test_translate_refuses_a_model_the_budget_cannot_cover(self, hosted_workspace, monkeypatch):
+        monkeypatch.setattr(hosted, "worst_case_usd", lambda: 5.0)
+        result = self.translate(hosted_workspace)
+        assert result.exit_code == 1
+        assert "could cost up to $5.00" in result.output
+        assert hosted_workspace.started == []

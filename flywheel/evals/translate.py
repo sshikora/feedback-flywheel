@@ -14,6 +14,7 @@ from typing import Any, NamedTuple, Protocol
 
 import httpx
 
+from flywheel.prompts import translation_prompt
 from flywheel.schema import EvalSegment, TranslationRecord
 from flywheel.storage import append_jsonl, read_jsonl
 
@@ -24,9 +25,6 @@ MAX_TOKENS = 4096  # stops a model that repeats itself. The app uses this on its
 
 # The app sends these on every OpenRouter request. See providers/openrouter.ts.
 ROUTING = {"provider": {"data_collection": "deny", "zdr": True}}
-
-# App language codes to the names its prompt uses.
-LANGUAGE_NAMES = {"en": "English", "ceb": "Cebuano"}
 
 
 class Completion(NamedTuple):
@@ -113,13 +111,7 @@ def _parse(payload: dict[str, Any]) -> Completion:
 
 
 def build_prompt(segment: EvalSegment) -> str:
-    source = LANGUAGE_NAMES[segment.src_lang]
-    target = LANGUAGE_NAMES[segment.tgt_lang]
-    return (
-        f"Translate the following text from {source} to {target}. "
-        "Return only the translated text with no explanation or commentary."
-        f"\n\n{segment.source}"
-    )
+    return translation_prompt(segment.source, segment.tgt_lang, segment.src_lang)
 
 
 def read_translations(path: Path) -> dict[tuple[str, str], TranslationRecord]:

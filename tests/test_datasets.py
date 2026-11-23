@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -214,3 +215,9 @@ def test_brand_bias_is_measured_over_votes_and_licenses_are_listed():
 def test_a_card_without_corpus_text_has_no_license_section():
     card = render_card(manifest("sft", build_sft(build_items(), DEFAULTS), DEFAULTS, SOURCE))
     assert "## Licenses" not in card
+
+
+def test_gemini_answers_never_train_by_default():
+    assert "google/gemini-3.8-flash" in DatasetConfig().exclude_models
+    default_file = Path(__file__).parent.parent / "configs" / "dataset.default.toml"
+    assert DatasetConfig.from_toml(default_file) == DatasetConfig()

@@ -1,0 +1,23 @@
+# The first run on synthetic pairs. DeepSeek V4.1 Flash translated English Wikinews
+# and Tatoeba sentences (docs/decisions/0017), added to the human pairs from the
+# first run. Settings match qwen3.5-9b-sft-opus-1, so the data is the only change.
+
+name = "qwen3.5-9b-sft-teacher-1"
+description = "English to Cebuano translation, LoRA SFT on 8,943 teacher pairs from DeepSeek V4.1 Flash and 1,781 human translations from Tatoeba and translatewiki."
+base_model = "Qwen/Qwen3.5-9B"
+method = "sft"
+dataset = "df528776a22a2b2d324a3cfeaa841ab84883865262d08a3441722ac5b280159e"  # from flywheel build
+seed = 1
+max_cost_usd = 15.0       # refused if Together's estimate is higher
+
+[hyperparameters]
+epochs = 3
+learning_rate = 0.0001
+batch_size = 8
+lora_rank = 64
+lora_alpha = 128
+
+[gate]
+min_judge_win_rate = 0.55
+guard_set = "flores200-dev-en-ceb"
+human_check = true

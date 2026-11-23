@@ -744,6 +744,40 @@ def rate_export(
     typer.echo(f"Keep {directory / 'key.json'} away from raters.")
 
 
+@rate_app.command("sample")
+def rate_sample(
+    round_name: Annotated[str, typer.Option("--round", help="For example m3-t1.")],
+    size: Annotated[int, typer.Option(min=1, help="Pairs to check, split evenly by source.")] = 100,
+    checks: Annotated[int, typer.Option(min=0, help="Hidden checks of each kind.")] = 6,
+    prefix: Annotated[str, typer.Option(help="Check sources whose name starts with this.")] = (
+        "teacher-"
+    ),
+    good_from: Annotated[
+        str,
+        typer.Option(help="The human source for good checks. Pick one that reads like the pairs."),
+    ] = "opus-tatoeba",
+    seed: str = "flywheel-v1",
+    data_dir: DataDir = Path("data"),
+) -> None:
+    """Write a blind sheet of curated training pairs for a speaker to check."""
+    curated = [
+        item.event for item in read_jsonl(data_dir / "curated" / "train.jsonl", CuratedEvent)
+    ]
+    pairs = [event for event in curated if event.source.startswith(prefix)]
+    if not pairs:
+        raise typer.BadParameter(f"no curated training pairs from sources named {prefix}*")
+    human = [event for event in curated if event.source == good_from and event.origin == "human"]
+    if len(human) < checks:
+        raise typer.BadParameter(f"{good_from} has {len(human)} human pairs, fewer than --checks")
+    rows = rating.build_sample_rows(pairs, human, seed, round_name, size, checks)
+    directory = data_dir / "ratings" / round_name
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "sheet.csv").write_text(rating.render_sheet(rows), encoding="utf-8")
+    write_json(directory / "key.json", rating.key_entries(rows))
+    typer.echo(f"wrote {len(rows)} rows to {directory / 'sheet.csv'}")
+    typer.echo(f"Keep {directory / 'key.json'} away from raters.")
+
+
 @rate_app.command("import")
 def rate_import(
     path: Path,

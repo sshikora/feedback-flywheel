@@ -1,6 +1,6 @@
 # 0017: Synthetic pairs: the teacher and the English text
 
-**Status:** Accepted, 2026-11-12. Source text is loaded. Updated 2026-11-19: the teacher step is built. Updated 2026-11-20: the teacher is called on DeepSeek's own API, not through OpenRouter.
+**Status:** Accepted, 2026-11-12. Source text is loaded. Updated 2026-11-19: the teacher step is built. Updated 2026-11-20: the teacher is called on DeepSeek's own API, not through OpenRouter, and both draws are translated.
 
 **Context.** The first trained model tied with its base, as expected from 1,781 corpus pairs (`0016`). The volume has to come from synthetic pairs, plan step 3, which needs two things: a teacher model whose terms allow training on its output, and English text we may use. `0011` left open whether answers written by Gemini may train.
 
@@ -58,7 +58,30 @@ Wikinews drops most for unbalanced quotes, 23,050 sentences, nearly all cut from
 - **A sentence that already has a human translation is skipped,** so the teacher never competes with a person. Two Tatoeba sentences in the first draw are skipped.
 - **Data cards credit both sides.** Each teacher source lists the source text's licence and attribution, and names the teacher.
 
-**Consequences.** Translating both draws costs at most about $0.53. A native speaker should read a sample of the answers before training. Every data card already shows the human and synthetic share.
+**First translation, 2026-11-20.**
+
+| | Wikinews | Tatoeba |
+|---|---|---|
+| Sentences sent | 5,000 | 4,998 |
+| Failed | 0 | 0 |
+| Cost | $0.35 | $0.15 |
+| Dropped by curation as spam | 9 | 3 |
+| Training pairs after curation | 4,499 | 4,444 |
+
+Most of the run fell in peak hours. About one answer in a thousand is broken, in four ways, read by hand:
+
+- **A Chinese word inside the Cebuano,** such as "ang mga进球" for "goals", and one answer wholly in Chinese. A new spam rule, `foreign_script`, drops an answer with Chinese, Japanese or Korean script its input does not have. It drops 8 answers, and no human pair.
+- **Left in English,** 3 answers. The existing `untranslated` rule drops them.
+- **Cut short,** "Human lang" for a 230-character sentence. The existing length rule drops it.
+- **A refusal,** "Please write the answer here." read as a request with no text. One pair in 10,000 is left in.
+
+A crude count of Tagalog words found nothing: the hits were words Cebuano shares, such as "niya". Three Wikinews sentences held an IP address or a phone number. Storage redacted them to placeholders on both sides, which is harmless.
+
+Curation holds 10% of inputs out, as for any source, so 1,025 teacher pairs are held out. 98 train pairs, counting all sources, are dropped as near duplicates of held-out text.
+
+**A native speaker checks a sample before training.** `flywheel rate sample --round m3-t1` writes a blind sheet in the M2 format: 50 curated training pairs from each source, 6 human Tatoeba pairs that should score well, and 6 teacher answers placed under another sentence, which should score badly. The good checks come from Tatoeba, because translatewiki's short interface strings would stand out. The scored sheet comes back through `flywheel rate import`. The human pairs also give a rough blind comparison of the teacher with people.
+
+**Consequences.** The pairs are ready to train once the sample is scored. Every data card already shows the human and synthetic share.
 
 Tatoeba's English has a house style: 26% of the draw names Tom or Mary, and 7% uses one contributor's recurring names, such as Yanni and Ziri. Names pass through translation, so this skews little, but the share is worth capping if Tatoeba grows.
 
